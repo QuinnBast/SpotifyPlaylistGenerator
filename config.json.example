@@ -1,0 +1,10 @@
+{
+  "api": {
+    "cliendId": "CLIENT_ID",
+    "clientSecret": "CLIENT_SECRET"
+  },
+  "credentials": {
+    "username": "USERNAME",
+    "password": "PASSWORD",
+  },
+}

@@ -6,7 +6,7 @@ import json
 class PlaylistGenerator:
     def __init__(self):
         with open('config.json') as jsonConfigFile:
-            self.config = json.load(jsonConfigFile)
+            self.config = json.loads(jsonConfigFile.read())
 
         scopes = 'playlist-modify-public playlist-read-private playlist-modify-private user-library-read'
 

@@ -1,0 +1,33 @@
+{
+  "api": {
+    "clientId": "YourClientId",
+    "clientSecret": "YourClientSecret"
+  },
+  "credentials": {
+    "username": "YourUsername"
+  },
+  "generator": {
+    "recurring": true,
+    "cadenceHours": 24,
+    "recentlyAdded": {
+      "enabled": true,
+      "playlistName": "Most Recently Starred",
+      "numberOfSongs": 50
+    },
+    "mostPlayedLongTerm": {
+      "enabled": true,
+      "playlistName": "Top songs - 1 Year",
+      "numberOfSongs": 100
+    },
+    "mostPlayedMediumTerm": {
+      "enabled": true,
+      "playlistName": "Top songs - 6 months",
+      "numberOfSongs": 50
+    },
+    "mostPlayedShortTerm": {
+      "enabled": true,
+      "playlistName": "Top songs - 4 weeks",
+      "numberOfSongs": 20
+    }
+  }
+}

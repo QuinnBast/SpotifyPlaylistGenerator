@@ -1,17 +1,41 @@
 # SpotifyPlaylistGenerator
 Various Spotify playlist generators to automatically generate common playlists that are not options Spotify by default
+This app generates the following playlists and keeps them up to date on a recurring schedule:
+
+- Most recently Starred
+- Your top songs (1 year)
+- Your top songs (6 months)
+- Your top songs (4 weeks)
 
 Note: Requires a spotify developer account & spotify app with a clientID and clientSecret.
 
-### Setup
+# Setup
 
 Clone the repository with `git clone https://github.com/QuinnBast/SpotifyPlaylistGenerator.git`
 
 Setup a config file by renaming the file `config.json.example` to `config.json` and changing the values to reflect your
-personal information. Once configured, run the generator with `python PlaylistGenerator.py`
+personal information. Once you have created your config file you can run this app one of two ways:
 
-It will prompt you to login to Spotify in the browser (Ensure that your spotify app allows redirects to `http://localhost`).
-Once you are taken to a second page, paste in the URL of the page that you are taken to in order to login.
+## As Standalone Python script
 
-Once logged in, the playlists will be generated. Currently this only generates a "Most recently Starred" playlist that
-adds the 50 most recently starred tracks to a playlist for you.
+To run this as a python script one-time, simply run `python PlaylistGenerator.py`.
+This will prompt you to login and automatically generate the configured playlists in your spotify account.
+
+You can then either set this up to run on a schedule using cron-jobs or use some other scheduling service on your own.
+Or, using the config, you can make the application just run forever. However I wouldn't recommend doing that as a standalone app.
+
+## As a Docker container
+
+I would recommend this method. After creating your configuration file, use the `Dockerfile` in this repository to build a local docker image.
+You can then save the docker image, move it where you need, or upload it to some registry.
+You can then use this docker image and move and run it wherever you like and it will run forever on a recurring basis.
+
+I used the following docker compose:
+
+```yaml
+services:
+  spotify-generator:
+    image: spotify-playlist-generator:1.0.0
+    ports:
+      - "9123:9123" # Maps the Oauth callback server listener when needed.
+```

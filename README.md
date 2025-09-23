@@ -38,4 +38,13 @@ services:
     image: spotify-playlist-generator:1.0.0
     ports:
       - "9123:9123" # Maps the Oauth callback server listener when needed.
+    # Optional:
+    volumes:
+      - /some/local/path/config.json:/app/config.json
 ```
+
+If you want, you can build the docker image without the configuration file so that your credentials are not baked into the image.
+To do this, simply build the dockerfile in the repository without your `config.json` file.
+Then, when you run the docker image, just mount the correct configuration file into the docker image.
+
+This will make the container re-usable for others, but I am too lazy to build this image and publish it for people to use.

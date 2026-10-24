@@ -1,0 +1,12 @@
+services:
+  spotify-generator:
+    image: spotify-playlist-generator:1.0.0
+    container_name: spotify-playlist-generator
+    restart: unless-stopped
+    ports:
+      - "9123:9123" # Must match api.redirectUri's port in config.json
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data # Persists the token cache across container restarts
+    env_file:
+      - .env

@@ -2,3 +2,9 @@ config.json
 .cache-QuinnBast
 .idea
 venv/*
+__pycache__/
+deploy/**/config.json
+.env
+*.tar
+*.tar.gz
+data/

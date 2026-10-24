@@ -1,10 +1,29 @@
 {
   "api": {
     "clientId": "YourClientId",
-    "clientSecret": "YourClientSecret"
+    "clientSecret": "YourClientSecret",
+    "redirectUri": "http://127.0.0.1:9123",
+    "cachePath": "./cache",
+    "callbackPort": 9123
+  },
+  "login": {
+    "refreshTokenLifetimeDays": 180,
+    "warningDaysBeforeExpiry": 14,
+    "reminderIntervalHours": 24
   },
   "credentials": {
     "username": "YourUsername"
+  },
+  "notifications": {
+    "discord": {
+      "enabled": false,
+      "webhookUrl": "https://discord.com/api/webhooks/your-webhook",
+      "mention": "<@your-discord-user-id>"
+    },
+    "ntfy": {
+      "enabled": false,
+      "url": "https://ntfy.sh/your-topic-here"
+    }
   },
   "generator": {
     "recurring": true,
@@ -28,6 +47,17 @@
       "enabled": true,
       "playlistName": "Top songs - 4 weeks",
       "numberOfSongs": 20
+    },
+    "dailyShuffle": {
+      "enabled": true,
+      "playlistName": "Daily Shuffle",
+      "numberOfSongs": 25
+    },
+    "forgottenFavorites": {
+      "enabled": true,
+      "playlistName": "Forgotten Favourites",
+      "numberOfSongs": 30,
+      "minDaysSinceLiked": 365
     }
   }
 }

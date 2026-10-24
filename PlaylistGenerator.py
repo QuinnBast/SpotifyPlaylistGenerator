@@ -1,30 +1,24 @@
-import spotipy
-from spotipy.oauth2 import SpotifyOAuth
+import os
 import json
+import random
 import schedule
 import time
 import logging
+from datetime import datetime, timedelta, timezone
+
+from auth import SpotifyAuth, is_login_expired
+from notifications import Notifier
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+
 
 class PlaylistGenerator:
     def __init__(self, config):
         self.config = config
-        scopes = 'playlist-modify-public playlist-read-private playlist-modify-private user-library-read user-top-read'
-
-        self.spotify = spotipy.Spotify(auth_manager=SpotifyOAuth(
-            scope=scopes,
-            client_id = self.config['api']['clientId'],
-            client_secret = self.config['api']['clientSecret'],
-            username=self.config['credentials']['username'],
-            # If you choose an http-scheme URL, and it’s for 127.0.0.1, AND it specifies a port,
-            # then spotipy will instantiate a server there to receive the access token from the response
-            # Note: This URL must be allowed in the spotify OAuth client in the dev portal
-            redirect_uri = "http://127.0.0.1:9123",
-            open_browser=False
-        ))
-
-        logging.info("Login successful")
+        notifier = Notifier(config.get('notifications', {}))
+        self.auth = SpotifyAuth(config.get('api', {}), config.get('credentials', {}), config.get('login', {}), notifier)
+        self.spotify = self.auth.authenticate()
+        self._liked_tracks = None  # all liked songs, fetched once per generation run
 
     def create_or_get_playlist_by_name(self, playlist_name):
         # Check if a playlist with the name exists.
@@ -49,7 +43,7 @@ class PlaylistGenerator:
 
 
     def most_recently_starred(self):
-        if not config['generator']['recentlyAdded']['enabled']:
+        if not self.config['generator']['recentlyAdded']['enabled']:
             return
 
         tracksToAdd = self.config['generator']['recentlyAdded']['numberOfSongs']
@@ -89,6 +83,9 @@ class PlaylistGenerator:
                 time_range=term
             )
 
+            if not response['items']:
+                break  # fewer top tracks than requested
+
             for track in response['items']:
                 fetched_tracks.append(track)
 
@@ -104,7 +101,7 @@ class PlaylistGenerator:
         elif term == "medium_term":
             configTitle = "MediumTerm"
 
-        if not config['generator']['mostPlayed' + configTitle]['enabled']:
+        if not self.config['generator']['mostPlayed' + configTitle]['enabled']:
             return
 
         tracksToAdd = self.config['generator']['mostPlayed' + configTitle]['numberOfSongs']
@@ -127,32 +124,132 @@ class PlaylistGenerator:
         # Replace the tracks in the playlist with the most recently starred tracks
         self.spotify.playlist_replace_items(playlist_id, user_top_songs)
 
+    def _get_all_liked_tracks(self):
+        """Every liked song (saved track) as Spotify returns it: {'added_at': ..., 'track': {...}}. Fetched once per
+        generation run, since several playlists use it."""
+        if self._liked_tracks is None:
+            self._liked_tracks = []
+            offset = 0
+            while True:
+                response = self.spotify.current_user_saved_tracks(50, offset)
+                # Local files and unavailable tracks have no id and can't be added to playlists.
+                self._liked_tracks.extend(item for item in response['items'] if item['track'] and item['track']['id'])
+                if response['next'] is None:
+                    break
+                offset = offset + 50
+            logging.info(f"Fetched {len(self._liked_tracks)} liked songs")
+        return self._liked_tracks
+
+    def _get_owned_playlist_track_ids(self, skip_playlist_names):
+        """Track ids in every playlist the user created (not ones they follow), except the named playlists."""
+        user_id = self.spotify.current_user()['id']
+        track_ids = set()
+        offset = 0
+        while True:
+            response = self.spotify.current_user_playlists(50, offset)
+            for playlist in response['items']:
+                if playlist['owner']['id'] != user_id or playlist['name'] in skip_playlist_names:
+                    continue
+                items_offset = 0
+                while True:
+                    items = self.spotify.playlist_items(playlist['id'], fields='items(track(id)),next',
+                                                        limit=100, offset=items_offset, additional_types=('track',))
+                    track_ids.update(item['track']['id'] for item in items['items'] if item['track'] and item['track']['id'])
+                    if items['next'] is None:
+                        break
+                    items_offset = items_offset + 100
+            if response['next'] is None:
+                break
+            offset = offset + 50
+        return track_ids
+
+    def _replace_playlist_tracks(self, playlist_name, track_ids):
+        playlist_id = self.create_or_get_playlist_by_name(playlist_name)
+        logging.info(f"Setting {len(track_ids)} tracks in '{playlist_name}'")
+        self.spotify.playlist_replace_items(playlist_id, track_ids)
+
+    def daily_shuffle(self):
+        """A random handful of liked songs, new every run (daily with the default cadence)."""
+        shuffle_config = self.config['generator'].get('dailyShuffle', {})
+        if not shuffle_config.get('enabled', False):
+            return
+
+        liked = self._get_all_liked_tracks()
+        picked = random.sample(liked, min(shuffle_config['numberOfSongs'], len(liked)))
+        self._replace_playlist_tracks(shuffle_config['playlistName'], [item['track']['id'] for item in picked])
+
+    def forgotten_favorites(self):
+        """Liked songs added a while ago that aren't in any playlist the user created and aren't among their top
+        tracks - songs liked once and never come back to. A random selection that stays the same for a week."""
+        forgotten_config = self.config['generator'].get('forgottenFavorites', {})
+        if not forgotten_config.get('enabled', False):
+            return
+
+        # The shuffling playlists change every run/week; excluding their songs would make this one keep changing too.
+        volatile_playlists = {forgotten_config['playlistName'],
+                              self.config['generator'].get('dailyShuffle', {}).get('playlistName')}
+        in_playlists = self._get_owned_playlist_track_ids(volatile_playlists)
+        top_tracks = {track['id'] for term in ("short_term", "medium_term", "long_term")
+                      for track in self._get_user_top_tracks(term, 50)}
+        liked_before = datetime.now(timezone.utc) - timedelta(days=forgotten_config.get('minDaysSinceLiked', 365))
+
+        candidates = sorted(
+            item['track']['id'] for item in self._get_all_liked_tracks()
+            if datetime.fromisoformat(item['added_at'].replace('Z', '+00:00')) < liked_before
+            and item['track']['id'] not in in_playlists
+            and item['track']['id'] not in top_tracks)
+        logging.info(f"{len(candidates)} forgotten favourites to pick from")
+
+        # Seeded by the ISO week, so the daily runs keep the same selection until the next week starts.
+        year, week, _ = datetime.now(timezone.utc).isocalendar()
+        picked = random.Random(f"{year}-W{week}").sample(candidates, min(forgotten_config['numberOfSongs'], len(candidates)))
+        self._replace_playlist_tracks(forgotten_config['playlistName'], picked)
+
     def do_generation(self):
+        self._liked_tracks = None  # pick up songs liked since the last run
         self.most_recently_starred()
         self.most_played("long_term")
         self.most_played("medium_term")
         self.most_played("short_term")
+        self.daily_shuffle()
+        self.forgotten_favorites()
+
+    def run_generation(self):
+        """do_generation for the schedule: logs failures instead of stopping the app, and logs in again (then retries)
+        if the login expired since the last run."""
+        try:
+            self.do_generation()
+        except Exception as e:
+            if not is_login_expired(e):
+                logging.exception("Playlist generation failed; trying again at the next scheduled run.")
+                return
+            logging.error("Spotify login expired (invalid_grant) - re-authentication required.")
+            self.spotify = self.auth.login_and_wait("required")
+            self.do_generation()
 
     def schedule_generation(self):
-        cadenceHours = config['generator']['cadenceHours']
-        schedule.every(cadenceHours).hours.do(self.do_generation)
+        cadenceHours = self.config['generator']['cadenceHours']
+        schedule.every(cadenceHours).hours.do(self.run_generation)
 
 
 if __name__ == "__main__":
-    with open('config.json') as jsonConfigFile:
+    config_path = os.environ.get('CONFIG_PATH', 'config.json')
+    with open(config_path) as jsonConfigFile:
         config = json.loads(jsonConfigFile.read())
 
-    logging.info(config)
+    # Only the playlist settings: the config can hold the client secret.
+    logging.info(f"Loaded {config_path}; generator settings: {json.dumps(config.get('generator', {}))}")
 
     generator = PlaylistGenerator(config)
 
     if config['generator']['recurring']:
-        generator.do_generation()
+        generator.run_generation()
         logging.info("Running on a recurring schedule")
         generator.schedule_generation()
         # Keep the program running.
         while True:
             schedule.run_pending()
+            generator.auth.check_login_expiry()
             time.sleep(600)  # Sleep for 10 minutes at a time to avoid busy-waiting
     else:
         generator.do_generation()

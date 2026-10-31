@@ -16,7 +16,18 @@ class PlaylistGenerator:
     def __init__(self, config):
         self.config = config
         notifier = Notifier(config.get('notifications', {}))
-        self.auth = SpotifyAuth(config.get('api', {}), config.get('credentials', {}), config.get('login', {}), notifier)
+
+        # Optional: record every play for the listening history dashboards (needs Postgres and one more permission).
+        self.history = None
+        extra_scopes = ()
+        history_config = config.get('listeningHistory', {})
+        if history_config.get('enabled', False):
+            import listening_history  # only needs psycopg when enabled
+            self.history = listening_history.ListeningHistory(history_config)
+            extra_scopes = listening_history.SCOPES
+
+        self.auth = SpotifyAuth(config.get('api', {}), config.get('credentials', {}), config.get('login', {}), notifier,
+                                extra_scopes)
         self.spotify = self.auth.authenticate()
         self._liked_tracks = None  # all liked songs, fetched once per generation run
 
@@ -214,22 +225,30 @@ class PlaylistGenerator:
         self.daily_shuffle()
         self.forgotten_favorites()
 
-    def run_generation(self):
-        """do_generation for the schedule: logs failures instead of stopping the app, and logs in again (then retries)
-        if the login expired since the last run."""
+    def _run_scheduled(self, job, what):
+        """Runs a scheduled job: logs failures instead of stopping the app, and logs in again (then retries) if the
+        login expired since the last run."""
         try:
-            self.do_generation()
+            job()
         except Exception as e:
             if not is_login_expired(e):
-                logging.exception("Playlist generation failed; trying again at the next scheduled run.")
+                logging.exception(f"{what} failed; trying again at the next scheduled run.")
                 return
             logging.error("Spotify login expired (invalid_grant) - re-authentication required.")
             self.spotify = self.auth.login_and_wait("required")
-            self.do_generation()
+            job()
+
+    def run_generation(self):
+        self._run_scheduled(self.do_generation, "Playlist generation")
+
+    def record_history(self):
+        self._run_scheduled(lambda: self.history.record_recent_plays(self.spotify), "Recording listening history")
 
     def schedule_generation(self):
         cadenceHours = self.config['generator']['cadenceHours']
         schedule.every(cadenceHours).hours.do(self.run_generation)
+        if self.history:
+            schedule.every(self.history.poll_minutes).minutes.do(self.record_history)
 
 
 if __name__ == "__main__":
@@ -244,12 +263,17 @@ if __name__ == "__main__":
 
     if config['generator']['recurring']:
         generator.run_generation()
+        if generator.history:
+            generator.record_history()
+            logging.info(f"Listening history: recording every {generator.history.poll_minutes:g} minutes")
         logging.info("Running on a recurring schedule")
         generator.schedule_generation()
         # Keep the program running.
         while True:
             schedule.run_pending()
             generator.auth.check_login_expiry()
-            time.sleep(600)  # Sleep for 10 minutes at a time to avoid busy-waiting
+            time.sleep(60)  # often enough for the listening history's schedule, without busy-waiting
     else:
         generator.do_generation()
+        if generator.history:
+            generator.history.record_recent_plays(generator.spotify)

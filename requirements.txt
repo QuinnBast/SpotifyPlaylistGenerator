@@ -7,3 +7,4 @@ schedule==1.2.2
 six==1.16.0
 spotipy==2.24.0
 urllib3==2.2.2
+psycopg[binary]==3.3.6

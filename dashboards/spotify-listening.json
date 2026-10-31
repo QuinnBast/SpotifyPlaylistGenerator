@@ -1,0 +1,939 @@
+{
+  "uid": "spotify-listening",
+  "title": "Spotify listening",
+  "description": "Every song played on Spotify: recorded by the playlist generator, plus imported data exports (github.com/QuinnBast/SpotifyPlaylistGenerator).",
+  "tags": [
+    "spotify",
+    "music"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "bucket",
+        "label": "Group by",
+        "type": "custom",
+        "query": "day,week,month",
+        "current": {
+          "text": "day",
+          "value": "day"
+        },
+        "options": [
+          {
+            "text": "day",
+            "value": "day",
+            "selected": true
+          },
+          {
+            "text": "week",
+            "value": "week",
+            "selected": false
+          },
+          {
+            "text": "month",
+            "value": "month",
+            "selected": false
+          }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Hours listened",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "spotify-history"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "spotify-history"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(round(sum(seconds) / 3600.0, 1), 0) FROM v_plays WHERE $__timeFilter(played_at)"
+        }
+      ],
+      "description": "Data-export plays count the time actually played; recorded plays count the song's length (Spotify only lists plays of 30 s or more).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: h",
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Plays",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "spotify-history"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "spotify-history"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) FROM v_plays WHERE $__timeFilter(played_at)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Songs",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "spotify-history"
+      },
+      "gridPos": {
+        "x": 7,
+        "y": 0,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "spotify-history"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(DISTINCT (lower(artist), lower(track_name))) FROM v_plays WHERE $__timeFilter(played_at)"
+        }
+      ],
+      "description": "Different songs played.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Artists",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "spotify-history"
+      },
+      "gridPos": {
+        "x": 10,
+        "y": 0,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "spotify-history"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(DISTINCT lower(artist)) FROM v_plays WHERE $__timeFilter(played_at)"
+        }
+      ],
+      "description": "Different main artists played.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Favourite artist",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "spotify-history"
+      },
+      "gridPos": {
+        "x": 13,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "spotify-history"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE((SELECT max(artist) || ' \u00b7 ' || count(*) || ' plays' FROM v_plays WHERE $__timeFilter(played_at) GROUP BY lower(artist) ORDER BY count(*) DESC LIMIT 1), '-')"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 22
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Most played song",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "spotify-history"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "spotify-history"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE((SELECT max(track_name) || ' \u2013 ' || max(artist) || ' \u00b7 ' || count(*) || ' plays' FROM v_plays WHERE $__timeFilter(played_at) GROUP BY lower(artist), lower(track_name) ORDER BY count(*) DESC LIMIT 1), '-')"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 22
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Hours per $bucket",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "spotify-history"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "spotify-history"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT date_trunc('$bucket', local_time) AT TIME ZONE (SELECT timezone FROM settings) AS time, round(sum(seconds) / 3600.0, 2) AS \"Hours\" FROM v_plays WHERE $__timeFilter(played_at) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: h",
+          "decimals": 1,
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#1db954"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "barAlignment": -1,
+            "barWidthFactor": 0.8,
+            "fillOpacity": 85,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "axisSoftMin": 0,
+            "gradientMode": "none"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "heatmap",
+      "title": "Days listened",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "spotify-history"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "spotify-history"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT w.week AT TIME ZONE (SELECT timezone FROM settings) AS time, round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 7), 0) / 3600.0, 2) AS \"Sun\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 6), 0) / 3600.0, 2) AS \"Sat\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 5), 0) / 3600.0, 2) AS \"Fri\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 4), 0) / 3600.0, 2) AS \"Thu\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 3), 0) / 3600.0, 2) AS \"Wed\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 2), 0) / 3600.0, 2) AS \"Tue\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 1), 0) / 3600.0, 2) AS \"Mon\" FROM generate_series(date_trunc('week', $__timeFrom() AT TIME ZONE (SELECT timezone FROM settings)), $__timeTo() AT TIME ZONE (SELECT timezone FROM settings), interval '1 week') AS w (week) LEFT JOIN v_plays p ON date_trunc('week', p.local_time) = w.week AND $__timeFilter(p.played_at) GROUP BY w.week ORDER BY w.week"
+        }
+      ],
+      "description": "Hours of listening per day over the last year, one column per week (like GitHub's contribution graph). Not limited by the time range.",
+      "timeFrom": "1y",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: h",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "cellGap": 2,
+        "cellValues": {
+          "unit": "suffix: h",
+          "decimals": 1
+        },
+        "color": {
+          "mode": "opacity",
+          "fill": "#39d353",
+          "scale": "exponential",
+          "exponent": 0.6,
+          "min": 0,
+          "steps": 64
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "reverse": false
+        },
+        "rowsFrame": {
+          "layout": "unknown"
+        },
+        "showValue": "never",
+        "legend": {
+          "show": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "yHistogram": false,
+          "showColorScale": false
+        },
+        "exemplars": {
+          "color": "transparent"
+        },
+        "filterValues": {
+          "le": 0.01
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Hours by weekday \u00d7 hour of day",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "spotify-history"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "spotify-history"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT d.label AS \"Day\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 0), 0) / 3600.0, 1) AS \"00\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 1), 0) / 3600.0, 1) AS \"01\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 2), 0) / 3600.0, 1) AS \"02\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 3), 0) / 3600.0, 1) AS \"03\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 4), 0) / 3600.0, 1) AS \"04\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 5), 0) / 3600.0, 1) AS \"05\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 6), 0) / 3600.0, 1) AS \"06\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 7), 0) / 3600.0, 1) AS \"07\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 8), 0) / 3600.0, 1) AS \"08\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 9), 0) / 3600.0, 1) AS \"09\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 10), 0) / 3600.0, 1) AS \"10\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 11), 0) / 3600.0, 1) AS \"11\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 12), 0) / 3600.0, 1) AS \"12\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 13), 0) / 3600.0, 1) AS \"13\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 14), 0) / 3600.0, 1) AS \"14\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 15), 0) / 3600.0, 1) AS \"15\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 16), 0) / 3600.0, 1) AS \"16\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 17), 0) / 3600.0, 1) AS \"17\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 18), 0) / 3600.0, 1) AS \"18\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 19), 0) / 3600.0, 1) AS \"19\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 20), 0) / 3600.0, 1) AS \"20\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 21), 0) / 3600.0, 1) AS \"21\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 22), 0) / 3600.0, 1) AS \"22\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = 23), 0) / 3600.0, 1) AS \"23\" FROM (VALUES (1, 'Mon'), (2, 'Tue'), (3, 'Wed'), (4, 'Thu'), (5, 'Fri'), (6, 'Sat'), (7, 'Sun')) AS d (dow, label) LEFT JOIN v_plays p ON EXTRACT(ISODOW FROM p.local_time) = d.dow AND $__timeFilter(p.played_at) GROUP BY d.dow, d.label ORDER BY d.dow"
+        }
+      ],
+      "description": "Each cell: hours of listening in that clock hour (local time) on that weekday, over the whole selected range - e.g. Thu / 21 = everything between 21:00 and 22:00 on every Thursday.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 1,
+          "min": 0,
+          "color": {
+            "mode": "continuous-greens"
+          },
+          "custom": {
+            "align": "center",
+            "minWidth": 40,
+            "cellOptions": {
+              "type": "color-background",
+              "mode": "gradient"
+            }
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": " "
+                }
+              }
+            }
+          ]
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Day"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.align",
+                "value": "left"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Top artists",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "spotify-history"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 8,
+        "h": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "spotify-history"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT max(artist) AS \"Artist\", count(*) AS \"Plays\", round(sum(seconds) / 3600.0, 1) AS \"Hours\", count(DISTINCT lower(track_name)) AS \"Songs\" FROM v_plays WHERE $__timeFilter(played_at) GROUP BY lower(artist) ORDER BY count(*) DESC LIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Plays"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#1db954"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Hours"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: h"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Top songs",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "spotify-history"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 28,
+        "w": 8,
+        "h": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "spotify-history"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT max(track_name) AS \"Song\", max(artist) AS \"Artist\", count(*) AS \"Plays\", round(sum(seconds) / 3600.0, 1) AS \"Hours\" FROM v_plays WHERE $__timeFilter(played_at) GROUP BY lower(artist), lower(track_name) ORDER BY count(*) DESC LIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Plays"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#1db954"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Hours"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: h"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 12,
+      "type": "table",
+      "title": "Top albums",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "spotify-history"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 28,
+        "w": 8,
+        "h": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "spotify-history"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT max(album_name) AS \"Album\", max(artist) AS \"Artist\", count(*) AS \"Plays\", round(sum(seconds) / 3600.0, 1) AS \"Hours\" FROM v_plays WHERE $__timeFilter(played_at) AND album_name IS NOT NULL GROUP BY lower(artist), lower(album_name) ORDER BY count(*) DESC LIMIT 50"
+        }
+      ],
+      "description": "The basic data export has no albums, so its plays aren't counted here.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Plays"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#1db954"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Hours"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: h"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "Recently played",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "spotify-history"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 41,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "spotify-history"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT played_at AS \"Played\", track_name AS \"Song\", array_to_string(artist_names, ', ') AS \"Artists\", album_name AS \"Album\", context_type AS \"From\", source AS \"Source\" FROM v_plays WHERE $__timeFilter(played_at) ORDER BY played_at DESC LIMIT 100"
+        }
+      ],
+      "description": "Played = when the song ended. From = album, playlist, artist page, ... (recorded plays only). Source: api = recorded by the app, export = imported from a Spotify data export.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Played"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "time: YYYY-MM-DD HH:mm"
+              },
+              {
+                "id": "custom.width",
+                "value": 140
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "From"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Source"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    }
+  ]
+}

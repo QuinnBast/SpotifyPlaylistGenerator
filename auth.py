@@ -53,8 +53,10 @@ class SpotifyAuth:
 
     SCOPES = 'playlist-modify-public playlist-read-private playlist-modify-private user-library-read user-top-read'
 
-    def __init__(self, api_config, credentials_config, login_config, notifier):
+    def __init__(self, api_config, credentials_config, login_config, notifier, extra_scopes=()):
         self.notifier = notifier
+        # Permissions for optional features (e.g. listening history); a login without them asks for a new one.
+        self.scope = ' '.join([self.SCOPES, *extra_scopes])
 
         # Credentials can be provided via config.json, but environment variables take
         # precedence so secrets don't need to be baked into the config file/image.
@@ -82,7 +84,7 @@ class SpotifyAuth:
                                                             login_config.get('reminderIntervalHours', 24)))
 
         self.auth_manager = SpotifyOAuth(
-            scope=self.SCOPES,
+            scope=self.scope,
             client_id=self.client_id,
             client_secret=self.client_secret,
             username=self.username,
@@ -96,9 +98,15 @@ class SpotifyAuth:
     def authenticate(self):
         """Returns a logged-in Spotify client, waiting for a login first if there is no usable token."""
         try:
-            if self.auth_manager.cache_handler.get_cached_token() is None:
+            token = self.auth_manager.cache_handler.get_cached_token()
+            if token is None:
                 logging.info("No cached Spotify token found; a login is required.")
                 return self.login_and_wait("required")
+            # spotipy treats a token without every requested permission as no token at all and falls back to asking
+            # on the terminal - which a container can't answer. Ask for a login the usual way instead.
+            if not set(self.scope.split()) <= set(token.get('scope', '').split()):
+                logging.info("The cached Spotify login lacks newly needed permissions; a login is required.")
+                return self.login_and_wait("permissions")
 
             spotify = spotipy.Spotify(auth_manager=self.auth_manager)
             # Force the token to be fetched/refreshed now instead of on first API call.
@@ -159,6 +167,10 @@ class SpotifyAuth:
                 return ("Spotify login needed soon",
                         f"The playlist generator's Spotify login expires {when}. "
                         "Log in again to keep the playlists updating.")
+        if reason == "permissions":
+            return ("Spotify login required",
+                    "A newly enabled feature (listening history) needs more Spotify permissions. Log in again to "
+                    "grant them; the playlists wait until then.")
         return ("Spotify login required",
                 "The playlist generator can't reach Spotify until you log in again.")
 

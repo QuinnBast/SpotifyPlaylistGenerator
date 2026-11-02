@@ -2356,7 +2356,7 @@
         "x": 0,
         "y": 96,
         "w": 8,
-        "h": 8
+        "h": 11
       },
       "targets": [
         {
@@ -2412,7 +2412,7 @@
         "x": 8,
         "y": 96,
         "w": 6,
-        "h": 8
+        "h": 11
       },
       "targets": [
         {
@@ -2468,7 +2468,7 @@
         "x": 14,
         "y": 96,
         "w": 10,
-        "h": 8
+        "h": 11
       },
       "targets": [
         {
@@ -2480,10 +2480,10 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT row_number() OVER (ORDER BY avg((reason_end IN ('fwdbtn', 'backbtn'))::integer) DESC, count(*) DESC) AS \"#\", COALESCE((array_agg(album_image) FILTER (WHERE album_image IS NOT NULL))[1], 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7') AS \"Cover\", max(track_name) AS \"Song\", max(artist) AS \"Artist\", count(*) AS \"Plays\", round(100.0 * avg((reason_end IN ('fwdbtn', 'backbtn'))::integer)) AS \"Skipped\" FROM v_plays WHERE $__timeFilter(played_at) AND reason_end IS NOT NULL GROUP BY lower(artist), lower(track_name) HAVING count(*) >= 10 ORDER BY avg((reason_end IN ('fwdbtn', 'backbtn'))::integer) DESC, count(*) DESC LIMIT 50"
+          "rawSql": "SELECT row_number() OVER (ORDER BY count(*) FILTER (WHERE skip) DESC, avg(skip::integer) DESC) AS \"#\", COALESCE((array_agg(album_image) FILTER (WHERE album_image IS NOT NULL))[1], 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7') AS \"Cover\", max(track_name) AS \"Song\", max(artist) AS \"Artist\", count(*) FILTER (WHERE skip) AS \"Skips\", round(100.0 * avg(skip::integer)) AS \"Skip rate\" FROM v_song_starts WHERE $__timeFilter(played_at) GROUP BY lower(artist), lower(track_name) HAVING count(*) FILTER (WHERE skip) > 0 ORDER BY count(*) FILTER (WHERE skip) DESC, avg(skip::integer) DESC LIMIT 50"
         }
       ],
-      "description": "Songs (played at least 10 times) you most often skipped to the next or previous song after the first 30 seconds - shorter plays aren't kept. Only Spotify data exports say this (the app's own recordings can't), so it covers plays up to your latest import.",
+      "description": "Songs you skipped most: moved to the next or previous song, or - in its first 30 seconds - picked something else or stopped. Skip rate = skips / times the song started (including starts under 30 s, which don't count as plays anywhere else). Only Spotify data exports say this (the app's own recordings can't), so it covers plays up to your latest import.",
       "fieldConfig": {
         "defaults": {
           "unit": "none"
@@ -2577,7 +2577,34 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Skipped"
+              "options": "Skips"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#1db954"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Skip rate"
             },
             "properties": [
               {
@@ -2586,7 +2613,7 @@
               },
               {
                 "id": "custom.width",
-                "value": 75
+                "value": 80
               }
             ]
           }
@@ -2608,7 +2635,7 @@
       "panels": [],
       "gridPos": {
         "x": 0,
-        "y": 104,
+        "y": 107,
         "w": 24,
         "h": 1
       }
@@ -2623,7 +2650,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 105,
+        "y": 108,
         "w": 24,
         "h": 12
       },

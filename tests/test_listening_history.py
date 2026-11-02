@@ -116,20 +116,21 @@ class ParsingTest(unittest.TestCase):
         path = self._zip({
             'Spotify Extended Streaming History/Streaming_History_Audio_2024-2025_0.json': [
                 extended_row('2025-01-01T10:00:00Z', 180_000),
-                extended_row('2025-01-01T10:03:00Z', 5_000),   # skipped after 5 s
+                {**extended_row('2025-01-01T10:03:00Z', 5_000), 'reason_end': 'fwdbtn'},   # skipped after 5 s
                 EPISODE],
             'Spotify Extended Streaming History/Streaming_History_Video_2024-2025.json': [EPISODE],
             'Spotify Account Data/StreamingHistory_music_0.json': [
                 {'endTime': '2025-01-01 10:00', 'artistName': 'Artist', 'trackName': 'Song', 'msPlayed': 180_000}],
         })
-        counts = Counter()
-        plays = import_history.parse_export([path], 30, counts)
+        counts, short = Counter(), []
+        plays = import_history.parse_export([path], 30, counts, short)
 
         self.assertEqual(len(plays), 1, 'extended history wins over the basic one; short plays and podcasts skipped')
         self.assertEqual((plays[0]['track_key'], plays[0]['artist_names'], plays[0]['ms_played']),
                          ('abc', ['Artist'], 180_000))
         self.assertEqual(plays[0]['played_at'], datetime(2025, 1, 1, 10, 0, tzinfo=timezone.utc))
         self.assertEqual(counts['played less than 30 s'], 1)
+        self.assertEqual([p['ms_played'] for p in short], [5_000], 'kept apart for the skip stats')
         self.assertEqual(counts['not a song (podcast, audiobook, removed track)'], 1)
 
     def test_basic_history_when_there_is_no_extended_one(self):
@@ -278,6 +279,22 @@ class DatabaseTest(unittest.TestCase):
         self.history.record_recent_plays(FakeSpotify([item]))
         self.assertEqual(self.query("SELECT track_id, album_image, artist_ids FROM tracks"),
                          [('t1', 'cover', ['a1', 'a2'])])
+
+    def test_skips_count_short_plays_without_counting_them_as_plays(self):
+        def row(minute, ms_played, reason_end, song='a'):
+            r = extended_row(f'2025-06-01T10:{minute:02d}:00Z', ms_played, f'spotify:track:{song}', f'Song {song}')
+            r['reason_end'] = r['platform'] = reason_end
+            return r
+        rows = [row(0, 5_000, 'fwdbtn'), row(1, 10_000, 'endplay'), row(2, 3_000, 'trackdone'),   # short
+                row(5, 200_000, 'trackdone'), row(10, 120_000, 'fwdbtn'), row(15, 150_000, 'endplay'),   # plays
+                row(20, 4_000, 'fwdbtn', 'b')]
+        self.assertEqual(import_history.main([self._write_export(rows)]), 0)
+        self.assertEqual(self.query("SELECT count(*) FROM v_plays"), [(3,)], 'short plays are not plays')
+        self.assertEqual(self.query("SELECT track_name, count(*), count(*) FILTER (WHERE skip) FROM v_song_starts "
+                                    "GROUP BY 1 ORDER BY 1"), [('Song a', 6, 3), ('Song b', 1, 1)],
+                         'next/previous any time; picked something else or stopped only in the first 30 s')
+        self.assertEqual(import_history.main([self._write_export(rows)]), 0)
+        self.assertEqual(self.query("SELECT count(*) FROM short_plays"), [(4,)], 'running it again adds nothing')
 
     def _write_export(self, rows):
         folder = tempfile.mkdtemp()

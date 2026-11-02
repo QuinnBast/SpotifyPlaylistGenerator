@@ -337,26 +337,27 @@ next_row(10)
 
 # === Where and how (data exports only) ===========================================================================
 section("Where and how")
-bars("Devices", at(0, 8, 8),
+bars("Devices", at(0, 8, 11),
      f"""SELECT device AS "Device", round(sum(seconds) / 3600.0, 1) AS "Hours" FROM v_plays
          WHERE {IN_RANGE} AND device IS NOT NULL GROUP BY device ORDER BY 2 DESC""",
      description="Hours per kind of device. " + EXPORT_ONLY)
-bars("Countries", at(8, 6, 8),
+bars("Countries", at(8, 6, 11),
      f"""SELECT country AS "Country", round(sum(seconds) / 3600.0, 1) AS "Hours" FROM v_plays
          WHERE {IN_RANGE} AND country IS NOT NULL GROUP BY country ORDER BY 2 DESC LIMIT 15""",
      description="Where you listened (two-letter country codes). " + EXPORT_ONLY)
-table("Most skipped songs", at(14, 10, 8),
-      f"""SELECT row_number() OVER (ORDER BY avg((reason_end IN ('fwdbtn', 'backbtn'))::integer) DESC, count(*) DESC)
-                 AS "#", {COVER} AS "Cover", max(track_name) AS "Song", max(artist) AS "Artist",
-                 count(*) AS "Plays",
-                 round(100.0 * avg((reason_end IN ('fwdbtn', 'backbtn'))::integer)) AS "Skipped"
-          FROM v_plays WHERE {IN_RANGE} AND reason_end IS NOT NULL
-          GROUP BY {SONG} HAVING count(*) >= 10
-          ORDER BY avg((reason_end IN ('fwdbtn', 'backbtn'))::integer) DESC, count(*) DESC LIMIT 50""",
-      images=("Cover",), overrides=[by_name("Skipped", ("unit", "percent"), ("custom.width", 75))],
-      description="Songs (played at least 10 times) you most often skipped to the next or previous song after the "
-                  "first 30 seconds - shorter plays aren't kept. " + EXPORT_ONLY)
-next_row(8)
+SKIPS = "count(*) FILTER (WHERE skip)"
+table("Most skipped songs", at(14, 10, 11),
+      f"""SELECT row_number() OVER (ORDER BY {SKIPS} DESC, avg(skip::integer) DESC) AS "#", {COVER} AS "Cover",
+                 max(track_name) AS "Song", max(artist) AS "Artist", {SKIPS} AS "Skips",
+                 round(100.0 * avg(skip::integer)) AS "Skip rate"
+          FROM v_song_starts WHERE {IN_RANGE}
+          GROUP BY {SONG} HAVING {SKIPS} > 0
+          ORDER BY {SKIPS} DESC, avg(skip::integer) DESC LIMIT 50""",
+      images=("Cover",), overrides=[plays_bar("Skips"), by_name("Skip rate", ("unit", "percent"), ("custom.width", 80))],
+      description="Songs you skipped most: moved to the next or previous song, or - in its first 30 seconds - picked "
+                  "something else or stopped. Skip rate = skips / times the song started (including starts under "
+                  "30 s, which don't count as plays anywhere else). " + EXPORT_ONLY)
+next_row(11)
 
 # === Recently played ==============================================================================================
 section("Recently played")

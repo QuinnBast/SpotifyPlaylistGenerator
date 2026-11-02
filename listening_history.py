@@ -126,6 +126,23 @@ def store_plays(conn, plays):
         return cur.execute("SELECT count(*) FROM plays").fetchone()[0] - before
 
 
+SHORT_PLAY_COLUMNS = ('played_at', 'track_key', 'track_id', 'track_name', 'artist_names', 'album_name',
+                      'ms_played') + EXPORT_DETAILS
+
+
+def store_short_plays(conn, plays):
+    """Stores plays under 30 s from a data export (for the skip stats only); returns how many were new."""
+    if not plays:
+        return 0
+    query = sql.SQL("INSERT INTO short_plays ({}) VALUES ({}) ON CONFLICT DO NOTHING").format(
+        sql.SQL(', ').join(map(sql.Identifier, SHORT_PLAY_COLUMNS)),
+        sql.SQL(', ').join(sql.Placeholder() * len(SHORT_PLAY_COLUMNS)))
+    with conn.transaction(), conn.cursor() as cur:
+        before = cur.execute("SELECT count(*) FROM short_plays").fetchone()[0]
+        cur.executemany(query, [tuple(play.get(c) for c in SHORT_PLAY_COLUMNS) for play in plays])
+        return cur.execute("SELECT count(*) FROM short_plays").fetchone()[0] - before
+
+
 def _store(conn, table, columns, rows):
     """Inserts or replaces rows of the tracks or artists table."""
     if rows:

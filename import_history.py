@@ -12,7 +12,8 @@ Writes to the app's database: listeningHistory.databaseUrl in config.json (or CO
 skipped. Plays from the moment the app started recording are skipped too, since the app has those already (and so is
 the same play recorded by both, a few seconds apart, where the two meet). Only songs
 are imported (no podcasts or audiobooks, like the app), and only plays of at least --min-seconds, which is what
-Spotify's "recently played" counts as a play.
+Spotify's "recently played" counts as a play. Shorter ones from the extended history are kept separately, only for
+the dashboard's skip stats.
 """
 import argparse
 import json
@@ -81,9 +82,10 @@ def play_from_basic(row):
     }
 
 
-def parse_export(paths, min_seconds, counts):
+def parse_export(paths, min_seconds, counts, short_plays=None):
     """All song plays in the export (extended history if there is any, else the basic one). Tallies what was left
-    out in `counts`."""
+    out in `counts`. Shorter plays from the extended history (which says how each ended) go in `short_plays`, if given,
+    for the skip stats."""
     extended, basic = [], []
     for name, data in read_json_files(paths):
         base = os.path.basename(name)
@@ -106,6 +108,8 @@ def parse_export(paths, min_seconds, counts):
             counts['not a song (podcast, audiobook, removed track)'] += 1
         elif (play['ms_played'] or 0) < min_seconds * 1000:
             counts[f'played less than {min_seconds:g} s'] += 1
+            if short_plays is not None and play.get('reason_end'):
+                short_plays.append(play)
         else:
             plays.append(play)
     return plays
@@ -135,7 +139,8 @@ def main(argv=None):
         return 1
 
     counts = Counter()
-    plays = parse_export(args.paths, args.min_seconds, counts)
+    short_plays = []
+    plays = parse_export(args.paths, args.min_seconds, counts, short_plays)
     if not counts['extended files'] and not counts['basic files']:
         logging.error("No streaming history found: expected Streaming_History_Audio_*.json or "
                       "StreamingHistory_music_*.json in the given paths")
@@ -158,8 +163,11 @@ def main(argv=None):
                 counts['already recorded by the app (after its first poll)'] += len(plays) - len(kept)
                 plays = kept
             added = history.store_plays(conn, plays)
+            short_added = history.store_short_plays(conn, short_plays)
         counts['already imported'] += len(plays) - added
         logging.info(f"Imported {added} plays")
+        if short_added:
+            logging.info(f"Kept {short_added} plays under {args.min_seconds:g} s for the skip stats only")
     else:
         logging.info(f"Dry run: {len(plays)} plays would be imported (minus any already in the database)")
 

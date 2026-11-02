@@ -111,6 +111,7 @@ python import_history.py my_spotify_data.zip   # or the unzipped folder, or JSON
 
 - Add `--dry-run` to only read the export and show what it would import.
 - Only songs played for at least 30 seconds are imported (`--min-seconds` to change), to match what the app records.
+  Shorter plays are kept apart, only for the dashboard's skip stats (that's where nearly all skips are).
   Podcasts and audiobooks are skipped.
 - Plays from when the app started recording onwards are skipped (the app has those already), and plays that are
   already imported are skipped, so it's safe to run again, e.g. with a newer export.

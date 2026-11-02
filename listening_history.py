@@ -122,7 +122,7 @@ def store_plays(conn, plays):
                           sql.SQL(" WHERE plays.platform IS NULL AND EXCLUDED.platform IS NOT NULL")])
     with conn.transaction(), conn.cursor() as cur:
         before = cur.execute("SELECT count(*) FROM plays").fetchone()[0]
-        cur.executemany(query, [tuple(play.get(c) for c in columns) for play in plays])
+        cur.executemany(query, (tuple(play.get(c) for c in columns) for play in plays))
         return cur.execute("SELECT count(*) FROM plays").fetchone()[0] - before
 
 
@@ -139,7 +139,7 @@ def store_short_plays(conn, plays):
         sql.SQL(', ').join(sql.Placeholder() * len(SHORT_PLAY_COLUMNS)))
     with conn.transaction(), conn.cursor() as cur:
         before = cur.execute("SELECT count(*) FROM short_plays").fetchone()[0]
-        cur.executemany(query, [tuple(play.get(c) for c in SHORT_PLAY_COLUMNS) for play in plays])
+        cur.executemany(query, (tuple(play.get(c) for c in SHORT_PLAY_COLUMNS) for play in plays))
         return cur.execute("SELECT count(*) FROM short_plays").fetchone()[0] - before
 
 

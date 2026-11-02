@@ -82,37 +82,47 @@ def play_from_basic(row):
     }
 
 
+def _compact(play):
+    """The play without its empty fields, its strings shared with every other play of the same song, artist, device,
+    ...: an export has ~100k plays of far fewer songs, and the import has to fit in the app's memory."""
+    return {k: sys.intern(v) if isinstance(v, str) else v for k, v in play.items() if v is not None}
+
+
 def parse_export(paths, min_seconds, counts, short_plays=None):
     """All song plays in the export (extended history if there is any, else the basic one). Tallies what was left
     out in `counts`. Shorter plays from the extended history (which says how each ended) go in `short_plays`, if given,
-    for the skip stats."""
-    extended, basic = [], []
+    for the skip stats. Each file is converted as it's read, so the raw export is never all in memory at once."""
+    found = {kind: {'plays': [], 'short': [], 'counts': Counter()} for kind in ('extended', 'basic')}
     for name, data in read_json_files(paths):
         base = os.path.basename(name)
         if EXTENDED.search(base):
-            extended.extend(data)
-            counts['extended files'] += 1
+            kind, parse = 'extended', play_from_extended
         elif BASIC.search(base):
-            basic.extend(data)
-            counts['basic files'] += 1
+            kind, parse = 'basic', play_from_basic
+        else:
+            continue
+        counts[f'{kind} files'] += 1
+        out = found[kind]
+        for row in data:
+            play = parse(row)
+            if play is None:
+                out['counts']['not a song (podcast, audiobook, removed track)'] += 1
+            elif (play['ms_played'] or 0) < min_seconds * 1000:
+                out['counts'][f'played less than {min_seconds:g} s'] += 1
+                if play.get('reason_end'):
+                    out['short'].append(_compact(play))
+            else:
+                out['plays'].append(_compact(play))
+        del data
 
-    if extended and basic:
+    if counts['extended files'] and counts['basic files']:
         logging.info(f"Using the extended streaming history; ignoring {counts['basic files']} basic history file(s) "
                      "(the same plays, with less detail)")
-    rows, parse = (extended, play_from_extended) if extended else (basic, play_from_basic)
-
-    plays = []
-    for row in rows:
-        play = parse(row)
-        if play is None:
-            counts['not a song (podcast, audiobook, removed track)'] += 1
-        elif (play['ms_played'] or 0) < min_seconds * 1000:
-            counts[f'played less than {min_seconds:g} s'] += 1
-            if short_plays is not None and play.get('reason_end'):
-                short_plays.append(play)
-        else:
-            plays.append(play)
-    return plays
+    chosen = found['extended'] if counts['extended files'] else found['basic']
+    counts.update(chosen['counts'])
+    if short_plays is not None:
+        short_plays.extend(chosen['short'])
+    return chosen['plays']
 
 
 def database_url_from_config():

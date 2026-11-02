@@ -217,32 +217,33 @@ next_row(16)
 
 # === When (a play counts in the hour it ended) ====================================================================
 section("When")
-GITHUB_GREEN = {"mode": "opacity", "fill": "#39d353", "scale": "exponential", "exponent": 0.6, "min": 0,
-                "steps": 64}
-day_columns = ", ".join(
-    f"""round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = {i + 1}), 0) / 3600.0, 2)
-        AS "{d}\"""" for i, d in reversed(list(enumerate(WEEKDAYS))))
-panel("heatmap", "Days listened", at(0, 24, 7),
-      f"""SELECT w.week AT TIME ZONE {TZ} AS time, {day_columns}
-          FROM generate_series(date_trunc('week', $__timeFrom() AT TIME ZONE {TZ}),
-                               $__timeTo() AT TIME ZONE {TZ}, interval '1 week') AS w (week)
-          LEFT JOIN v_plays p ON date_trunc('week', p.local_time) = w.week AND $__timeFilter(p.played_at)
-          GROUP BY w.week ORDER BY w.week""",
-      description="Hours of listening per day over the last year, one column per week (like GitHub's contribution "
-                  "graph). Not limited by the time range.",
-      timeFrom="1y",
-      fieldConfig={"defaults": {"unit": "suffix: h", "decimals": 1}, "overrides": []},
-      options={"calculate": False, "cellGap": 2, "cellValues": {"unit": "suffix: h", "decimals": 1},
-               "color": GITHUB_GREEN, "yAxis": {"axisPlacement": "left", "reverse": False},
-               "rowsFrame": {"layout": "unknown"}, "showValue": "never", "legend": {"show": True},
-               "tooltip": {"mode": "single", "yHistogram": False, "showColorScale": False},
-               "exemplars": {"color": "transparent"}, "filterValues": {"le": 0.01}})
-next_row(7)
+weekday_values = ", ".join(f"({i + 1}, '{d}')" for i, d in enumerate(WEEKDAYS))
+panel("barchart", "Average hours by day of the week", at(0, 24, 8),
+      f"""WITH days AS (SELECT d::date AS day, EXTRACT(ISODOW FROM d)::integer AS dow
+                        FROM generate_series(GREATEST(($__timeFrom() AT TIME ZONE {TZ})::date,
+                                                      (SELECT min(local_time)::date FROM v_plays)),
+                                             ($__timeTo() AT TIME ZONE {TZ})::date, interval '1 day') AS d),
+               listened AS (SELECT local_time::date AS day, sum(seconds) / 3600.0 AS hours
+                            FROM v_plays WHERE {IN_RANGE} GROUP BY 1)
+          SELECT w.label AS "Day", round(avg(COALESCE(l.hours, 0)), 2) AS "Hours"
+          FROM (VALUES {weekday_values}) AS w (dow, label)
+          JOIN days ON days.dow = w.dow
+          LEFT JOIN listened l ON l.day = days.day
+          GROUP BY w.dow, w.label ORDER BY w.dow""",
+      description="How long you listen on each day of the week, on average over the selected range (days without "
+                  "music count as 0; days before your first recorded play don't count).",
+      fieldConfig={"defaults": {"unit": "suffix: h", "decimals": 1, "min": 0,
+                                "color": {"mode": "fixed", "fixedColor": GREEN},
+                                "custom": {"fillOpacity": 85, "lineWidth": 0, "gradientMode": "none"}},
+                   "overrides": []},
+      options={"xField": "Day", "orientation": "vertical", "showValue": "always", "barWidth": 0.7,
+               "groupWidth": 0.7, "stacking": "none", "xTickLabelRotation": 0,
+               "legend": {"showLegend": False}, "tooltip": {"mode": "single", "sort": "none"}})
+next_row(8)
 
 hour_columns = ", ".join(
     f"""round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(HOUR FROM p.local_time) = {h}), 0) / 3600.0, 1)
         AS "{h:02d}\"""" for h in range(24))
-weekday_values = ", ".join(f"({i + 1}, '{d}')" for i, d in enumerate(WEEKDAYS))
 panel("table", "Hours by weekday × hour of day", at(0, 24, 9),
       f"""SELECT d.label AS "Day", {hour_columns}
           FROM (VALUES {weekday_values}) AS d (dow, label)

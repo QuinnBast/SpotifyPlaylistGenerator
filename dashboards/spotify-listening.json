@@ -998,8 +998,8 @@
     },
     {
       "id": 16,
-      "type": "heatmap",
-      "title": "Days listened",
+      "type": "barchart",
+      "title": "Average hours by day of the week",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "spotify-history"
@@ -1008,7 +1008,7 @@
         "x": 0,
         "y": 33,
         "w": 24,
-        "h": 7
+        "h": 8
       },
       "targets": [
         {
@@ -1020,54 +1020,41 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT w.week AT TIME ZONE (SELECT timezone FROM settings) AS time, round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 7), 0) / 3600.0, 2) AS \"Sun\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 6), 0) / 3600.0, 2) AS \"Sat\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 5), 0) / 3600.0, 2) AS \"Fri\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 4), 0) / 3600.0, 2) AS \"Thu\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 3), 0) / 3600.0, 2) AS \"Wed\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 2), 0) / 3600.0, 2) AS \"Tue\", round(COALESCE(sum(p.seconds) FILTER (WHERE EXTRACT(ISODOW FROM p.local_time) = 1), 0) / 3600.0, 2) AS \"Mon\" FROM generate_series(date_trunc('week', $__timeFrom() AT TIME ZONE (SELECT timezone FROM settings)), $__timeTo() AT TIME ZONE (SELECT timezone FROM settings), interval '1 week') AS w (week) LEFT JOIN v_plays p ON date_trunc('week', p.local_time) = w.week AND $__timeFilter(p.played_at) GROUP BY w.week ORDER BY w.week"
+          "rawSql": "WITH days AS (SELECT d::date AS day, EXTRACT(ISODOW FROM d)::integer AS dow FROM generate_series(GREATEST(($__timeFrom() AT TIME ZONE (SELECT timezone FROM settings))::date, (SELECT min(local_time)::date FROM v_plays)), ($__timeTo() AT TIME ZONE (SELECT timezone FROM settings))::date, interval '1 day') AS d), listened AS (SELECT local_time::date AS day, sum(seconds) / 3600.0 AS hours FROM v_plays WHERE $__timeFilter(played_at) GROUP BY 1) SELECT w.label AS \"Day\", round(avg(COALESCE(l.hours, 0)), 2) AS \"Hours\" FROM (VALUES (1, 'Mon'), (2, 'Tue'), (3, 'Wed'), (4, 'Thu'), (5, 'Fri'), (6, 'Sat'), (7, 'Sun')) AS w (dow, label) JOIN days ON days.dow = w.dow LEFT JOIN listened l ON l.day = days.day GROUP BY w.dow, w.label ORDER BY w.dow"
         }
       ],
-      "description": "Hours of listening per day over the last year, one column per week (like GitHub's contribution graph). Not limited by the time range.",
-      "timeFrom": "1y",
+      "description": "How long you listen on each day of the week, on average over the selected range (days without music count as 0; days before your first recorded play don't count).",
       "fieldConfig": {
         "defaults": {
           "unit": "suffix: h",
-          "decimals": 1
+          "decimals": 1,
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#1db954"
+          },
+          "custom": {
+            "fillOpacity": 85,
+            "lineWidth": 0,
+            "gradientMode": "none"
+          }
         },
         "overrides": []
       },
       "options": {
-        "calculate": false,
-        "cellGap": 2,
-        "cellValues": {
-          "unit": "suffix: h",
-          "decimals": 1
-        },
-        "color": {
-          "mode": "opacity",
-          "fill": "#39d353",
-          "scale": "exponential",
-          "exponent": 0.6,
-          "min": 0,
-          "steps": 64
-        },
-        "yAxis": {
-          "axisPlacement": "left",
-          "reverse": false
-        },
-        "rowsFrame": {
-          "layout": "unknown"
-        },
-        "showValue": "never",
+        "xField": "Day",
+        "orientation": "vertical",
+        "showValue": "always",
+        "barWidth": 0.7,
+        "groupWidth": 0.7,
+        "stacking": "none",
+        "xTickLabelRotation": 0,
         "legend": {
-          "show": true
+          "showLegend": false
         },
         "tooltip": {
           "mode": "single",
-          "yHistogram": false,
-          "showColorScale": false
-        },
-        "exemplars": {
-          "color": "transparent"
-        },
-        "filterValues": {
-          "le": 0.01
+          "sort": "none"
         }
       }
     },
@@ -1081,7 +1068,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 40,
+        "y": 41,
         "w": 24,
         "h": 9
       },
@@ -1169,7 +1156,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 49,
+        "y": 50,
         "w": 12,
         "h": 10
       },
@@ -1303,7 +1290,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 49,
+        "y": 50,
         "w": 12,
         "h": 10
       },
@@ -1428,7 +1415,7 @@
       "panels": [],
       "gridPos": {
         "x": 0,
-        "y": 59,
+        "y": 60,
         "w": 24,
         "h": 1
       }
@@ -1443,7 +1430,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 60,
+        "y": 61,
         "w": 8,
         "h": 14
       },
@@ -1582,7 +1569,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 60,
+        "y": 61,
         "w": 8,
         "h": 14
       },
@@ -1709,7 +1696,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 60,
+        "y": 61,
         "w": 8,
         "h": 14
       },
@@ -1837,7 +1824,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 74,
+        "y": 75,
         "w": 12,
         "h": 10
       },
@@ -1980,7 +1967,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 74,
+        "y": 75,
         "w": 12,
         "h": 10
       },
@@ -2122,7 +2109,7 @@
       "panels": [],
       "gridPos": {
         "x": 0,
-        "y": 84,
+        "y": 85,
         "w": 24,
         "h": 1
       }
@@ -2137,7 +2124,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 85,
+        "y": 86,
         "w": 14,
         "h": 10
       },
@@ -2197,7 +2184,7 @@
       },
       "gridPos": {
         "x": 14,
-        "y": 85,
+        "y": 86,
         "w": 10,
         "h": 10
       },
@@ -2339,7 +2326,7 @@
       "panels": [],
       "gridPos": {
         "x": 0,
-        "y": 95,
+        "y": 96,
         "w": 24,
         "h": 1
       }
@@ -2354,7 +2341,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 96,
+        "y": 97,
         "w": 8,
         "h": 11
       },
@@ -2410,7 +2397,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 96,
+        "y": 97,
         "w": 6,
         "h": 11
       },
@@ -2466,7 +2453,7 @@
       },
       "gridPos": {
         "x": 14,
-        "y": 96,
+        "y": 97,
         "w": 10,
         "h": 11
       },
@@ -2635,7 +2622,7 @@
       "panels": [],
       "gridPos": {
         "x": 0,
-        "y": 107,
+        "y": 108,
         "w": 24,
         "h": 1
       }
@@ -2650,7 +2637,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 108,
+        "y": 109,
         "w": 24,
         "h": 12
       },

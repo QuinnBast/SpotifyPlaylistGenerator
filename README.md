@@ -77,8 +77,9 @@ You must also configure this setting in the Spotify developer dashboard. Spotify
 ## Listening history (optional)
 
 With `listeningHistory.enabled: true`, the app also records every song you play in a Postgres database, for the
-Grafana dashboard in `dashboards/` (when you listen, which days and hours, top artists, songs and albums). It's off by
-default.
+Grafana dashboard in `dashboards/`: when you listen (days, hours, streaks, longest sessions), a year-by-year
+"Wrapped", ranked top artists, songs and albums with covers and pictures, obsessions, forgotten favourites,
+new artists you found, and devices, countries and skips (from data exports). It's off by default.
 
 - **How:** every `pollMinutes` (default 15) it reads Spotify's "recently played": your last 50 plays of 30 seconds or
   more, with the exact time each ended. That catches every play even if the app was down for a couple of hours (it

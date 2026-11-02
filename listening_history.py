@@ -5,7 +5,7 @@ each ended. Reading it every 15 minutes or so catches every play, even after the
 import_history.py fills in the past from a Spotify data export."""
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import psycopg
@@ -19,6 +19,11 @@ _MIGRATION_LOCK = 7_265_101
 SCOPES = ('user-read-recently-played',)
 # "Recently played" never returns more than this.
 RECENTLY_PLAYED_LIMIT = 50
+
+# The app and a data export time the same play slightly differently (the export to the second), so where the two
+# meet the same play can arrive twice under different times. A play of the same song from the other source ending
+# within this window is that play.
+SAME_PLAY_WINDOW = timedelta(seconds=10)
 
 COLUMNS = ('played_at', 'track_key', 'track_id', 'track_name', 'artist_names', 'artist_ids', 'album_id', 'album_name',
            'duration_ms', 'ms_played', 'context_type', 'context_uri', 'source')
@@ -100,6 +105,25 @@ def store_plays(conn, plays):
         return cur.execute("SELECT count(*) FROM plays").fetchone()[0] - before
 
 
+def without_plays_from(conn, plays, source):
+    """`plays` minus those the database already has from the other `source` ('api' or 'export'): the same song (by
+    track id or name) ending within SAME_PLAY_WINDOW."""
+    if not plays:
+        return plays
+    times = [p['played_at'] for p in plays]
+    stored = conn.execute(
+        "SELECT played_at, track_key, lower(track_name) FROM plays WHERE source = %s AND played_at BETWEEN %s AND %s",
+        (source, min(times) - SAME_PLAY_WINDOW, max(times) + SAME_PLAY_WINDOW)).fetchall()
+    if not stored:
+        return plays
+
+    def is_stored(play):
+        return any(abs(at - play['played_at']) <= SAME_PLAY_WINDOW
+                   and (key == play['track_key'] or name == play['track_name'].lower())
+                   for at, key, name in stored)
+    return [p for p in plays if not is_stored(p)]
+
+
 def first_api_play(conn):
     """When the app's own recording starts (None before its first poll). Imports stop there."""
     return conn.execute("SELECT min(played_at) FROM plays WHERE source = 'api'").fetchone()[0]
@@ -117,13 +141,13 @@ class ListeningHistory:
 
     def __init__(self, history_config):
         self.poll_minutes = float(os.environ.get('LISTENING_HISTORY_POLL_MINUTES', history_config.get('pollMinutes', 15)))
-        # The database URL holds a password: it normally comes from the environment, not config.json.
+        # DATABASE_URL overrides the config (e.g. to keep the password in a Kubernetes secret).
         self.database_url = os.environ.get('DATABASE_URL', history_config.get('databaseUrl'))
         if not self.database_url:
-            raise ValueError("listeningHistory is enabled but no database is set: set DATABASE_URL "
-                             "(e.g. postgresql://user:password@host:5432/dbname)")
+            raise ValueError("listeningHistory is enabled but no database is set: set listeningHistory.databaseUrl "
+                             "in config.json or DATABASE_URL (e.g. postgresql://user:password@host:5432/dbname)")
         # Optional: a read-only Postgres role "grafana" with this password, for the dashboards.
-        self.grafana_password = os.environ.get('GRAFANA_DB_PASSWORD')
+        self.grafana_password = os.environ.get('GRAFANA_DB_PASSWORD', history_config.get('grafanaPassword')) or None
         # Days and hours on the dashboards are in this time zone.
         self.timezone = os.environ.get('TZ') or history_config.get('timeZone', 'UTC')
         self._prepared = False
@@ -139,7 +163,8 @@ class ListeningHistory:
                 apply_settings(conn, self.timezone, self.grafana_password)
                 self._prepared = True
             previous_latest = latest_api_play(conn)
-            added = store_plays(conn, plays)
+            # After an import, the first poll overlaps the end of the export.
+            added = store_plays(conn, without_plays_from(conn, plays, 'export'))
 
         # A full page that is all new means there may have been more plays than Spotify still lists.
         if previous_latest and len(plays) == RECENTLY_PLAYED_LIMIT and min(p['played_at'] for p in plays) > previous_latest:

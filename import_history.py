@@ -8,8 +8,9 @@ at spotify.com -> Account -> Privacy settings -> Download your data:
   - "Account data": only the last year, StreamingHistory_music_*.json (no track ids). Used only when the zip/folder has
     no extended history.
 
-Writes to the database in DATABASE_URL (the same one the app uses). Safe to run again: plays already stored are
-skipped. Plays from the moment the app started recording are skipped too, since the app has those already. Only songs
+Writes to the app's database: listeningHistory.databaseUrl in config.json (or CONFIG_PATH), or DATABASE_URL. Safe to run again: plays already stored are
+skipped. Plays from the moment the app started recording are skipped too, since the app has those already (and so is
+the same play recorded by both, a few seconds apart, where the two meet). Only songs
 are imported (no podcasts or audiobooks, like the app), and only plays of at least --min-seconds, which is what
 Spotify's "recently played" counts as a play.
 """
@@ -107,6 +108,16 @@ def parse_export(paths, min_seconds, counts):
     return plays
 
 
+def database_url_from_config():
+    """The app's database, the way the app finds it: DATABASE_URL, else listeningHistory.databaseUrl in the config."""
+    if os.environ.get('DATABASE_URL'):
+        return os.environ['DATABASE_URL']
+    config_path = Path(os.environ.get('CONFIG_PATH', 'config.json'))
+    if config_path.exists():
+        return json.loads(config_path.read_text(encoding='utf-8')).get('listeningHistory', {}).get('databaseUrl')
+    return None
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('paths', nargs='+', metavar='PATH', help='export zip, folder or JSON file(s)')
@@ -131,15 +142,16 @@ def main(argv=None):
                      f"{max(p['played_at'] for p in plays):%Y-%m-%d}")
 
     if not args.dry_run:
-        database_url = os.environ.get('DATABASE_URL')
+        database_url = database_url_from_config()
         if not database_url:
-            logging.error("Set DATABASE_URL to the listening history database (the app's own DATABASE_URL)")
+            logging.error("No database: set listeningHistory.databaseUrl in config.json (or CONFIG_PATH), "
+                          "or DATABASE_URL")
             return 1
         with history.connect(database_url) as conn:
             history.migrate(conn)
             recording_since = history.first_api_play(conn)
             if recording_since:
-                kept = [p for p in plays if p['played_at'] < recording_since]
+                kept = history.without_plays_from(conn, [p for p in plays if p['played_at'] < recording_since], 'api')
                 counts['already recorded by the app (after its first poll)'] += len(plays) - len(kept)
                 plays = kept
             added = history.store_plays(conn, plays)

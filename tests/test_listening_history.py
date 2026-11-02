@@ -180,6 +180,30 @@ class DatabaseTest(unittest.TestCase):
         self.assertEqual(import_history.main([folder]), 0)
         self.assertEqual(self.query("SELECT count(*) FROM plays")[0][0], 4, 'running it again adds nothing')
 
+    def _write_export(self, rows):
+        folder = tempfile.mkdtemp()
+        with open(os.path.join(folder, 'Streaming_History_Audio_2026_0.json'), 'w', encoding='utf-8') as f:
+            json.dump(rows, f)
+        return folder
+
+    def test_first_poll_after_an_import_skips_the_overlap(self):
+        # The export's last plays are the app's first ones, timed a fraction of a second differently.
+        rows = [extended_row((T0 - timedelta(minutes=m)).strftime('%Y-%m-%dT%H:%M:%SZ'), 120_000,
+                             f'spotify:track:t{m // 4}', f'Song {m // 4}') for m in (8, 4, 0)]
+        self.assertEqual(import_history.main([self._write_export(rows)]), 0)
+        items = [recently_played_item(i, -i * 4 + 0.0123) for i in range(3)] + [recently_played_item(9, 5)]
+        self.assertEqual(self.history.record_recent_plays(FakeSpotify(items)), 1, 'only the play after the export')
+        self.assertEqual(self.query("SELECT count(*) FROM plays")[0][0], 4)
+
+    def test_import_after_the_app_skips_the_overlap(self):
+        self.history.record_recent_plays(FakeSpotify([recently_played_item(0, 0.0123), recently_played_item(1, 4)]))
+        # The app's first play also ends the export, a moment *before* the app's time for it.
+        rows = [extended_row((T0 - timedelta(minutes=4)).strftime('%Y-%m-%dT%H:%M:%SZ'), 120_000, 'spotify:track:old'),
+                extended_row(T0.strftime('%Y-%m-%dT%H:%M:%SZ'), 120_000, 'spotify:track:t0', 'Song 0')]
+        self.assertEqual(import_history.main([self._write_export(rows)]), 0)
+        self.assertEqual(self.query("SELECT source, count(*) FROM plays GROUP BY source ORDER BY source"),
+                         [('api', 2), ('export', 1)])
+
 
 if __name__ == '__main__':
     unittest.main()

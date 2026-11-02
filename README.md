@@ -37,7 +37,7 @@ secrets out of the config file/docker image:
 | `listeningHistory.databaseUrl` | `DATABASE_URL`       |
 | `listeningHistory.pollMinutes` | `LISTENING_HISTORY_POLL_MINUTES` |
 | `listeningHistory.timeZone` | `TZ`                    |
-| (no config value)          | `GRAFANA_DB_PASSWORD`    |
+| `listeningHistory.grafanaPassword` | `GRAFANA_DB_PASSWORD` |
 
 The config file is read from `config.json`, or from the path in `CONFIG_PATH`.
 
@@ -77,12 +77,12 @@ default.
 - **How:** every `pollMinutes` (default 15) it reads Spotify's "recently played": your last 50 plays of 30 seconds or
   more, with the exact time each ended. That catches every play even if the app was down for a couple of hours (it
   logs a warning if plays may have been missed). Songs only: Spotify doesn't list podcasts there.
-- **Database:** `DATABASE_URL`, e.g. `postgresql://spotify:<password>@postgres:5432/spotify`. The app creates its
+- **Database:** `listeningHistory.databaseUrl` (or `DATABASE_URL`), e.g. `postgresql://spotify:<password>@postgres:5432/spotify`. The app creates its
   tables on the first poll. If the database is down, the playlists keep working and the next poll tries again.
-- **Grafana:** set `GRAFANA_DB_PASSWORD` and the app creates a read-only Postgres role `grafana` with it. Point a
+- **Grafana:** set `listeningHistory.grafanaPassword` (or `GRAFANA_DB_PASSWORD`) and the app creates a read-only Postgres role `grafana` with it. Point a
   PostgreSQL datasource with uid `spotify-history` at the database as that user, and import
   `dashboards/spotify-listening.json` (`python dashboards/build.py dashboards` regenerates it after changing `build.py`).
-- **Days and hours** on the dashboard use the time zone in `TZ` (default UTC).
+- **Days and hours** on the dashboard use `listeningHistory.timeZone` (or `TZ`), e.g. `America/Regina` (default UTC).
 - **New permission:** it needs `user-read-recently-played`. Turning it on makes the app ask for one new login (the
   usual notification with a login link); the playlists wait until you've logged in. Turning it off asks for nothing.
 
@@ -90,10 +90,10 @@ default.
 
 Spotify can send you your whole history: spotify.com -> Account -> **Privacy settings** -> **Download your data**, tick
 **Extended streaming history** (takes up to 30 days; "Account data" alone only has the last year, without track ids).
-You get an email with a zip. `import_history.py` loads it into the same database:
+You get an email with a zip. `import_history.py` loads it into the app's database (from `config.json`, or `DATABASE_URL`):
 
 ```bash
-DATABASE_URL=postgresql://... python import_history.py my_spotify_data.zip   # or the unzipped folder, or JSON files
+python import_history.py my_spotify_data.zip   # or the unzipped folder, or JSON files
 ```
 
 - Add `--dry-run` to only read the export and show what it would import.
@@ -102,10 +102,12 @@ DATABASE_URL=postgresql://... python import_history.py my_spotify_data.zip   # o
 - Plays from when the app started recording onwards are skipped (the app has those already), and plays that are
   already imported are skipped, so it's safe to run again, e.g. with a newer export.
 
-In a container, copy the zip in and run it there, so it uses the container's `DATABASE_URL`:
+In a container, copy the zip in and run it there, so it uses the container's config and database:
 
 ```bash
 docker cp my_spotify_data.zip <container>:/tmp/ && docker exec <container> python import_history.py /tmp/my_spotify_data.zip
+# Kubernetes:
+kubectl cp my_spotify_data.zip <pod>:/tmp/ && kubectl exec <pod> -- python import_history.py /tmp/my_spotify_data.zip
 ```
 
 # Setup

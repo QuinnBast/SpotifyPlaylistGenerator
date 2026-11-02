@@ -16,6 +16,9 @@
   },
   "listeningHistory": {
     "enabled": false,
+    "databaseUrl": "postgresql://spotify:your-password@your-postgres-host:5432/spotify",
+    "grafanaPassword": "",
+    "timeZone": "UTC",
     "pollMinutes": 15
   },
   "notifications": {

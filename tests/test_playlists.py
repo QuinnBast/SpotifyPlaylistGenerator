@@ -56,13 +56,13 @@ class FakeSpotify:
 
     def playlist_items(self, playlist_id, fields, limit, offset, additional_types):
         ids = PLAYLIST_TRACKS[playlist_id][offset:offset + limit]
-        return {'items': [{'track': {'id': i} if i else None} for i in ids], 'next': None}
+        return {'items': [{'item': {'id': i} if i else None} for i in ids], 'next': None}
 
     def current_user_top_tracks(self, limit, offset, time_range):
         tracks = [{'id': t, 'name': t, 'artists': [{'name': 'A'}]} for t in TOP_TRACKS]
         return {'items': tracks[offset:offset + limit]}   # fewer than requested
 
-    def user_playlist_create(self, user, name, public):
+    def current_user_playlist_create(self, name, public):
         return {'id': name}
 
     def playlist_replace_items(self, playlist_id, track_ids):

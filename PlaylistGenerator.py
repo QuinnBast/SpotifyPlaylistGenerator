@@ -49,7 +49,7 @@ class PlaylistGenerator:
 
         # If the playlist was not found, create a new
         logging.info("Playlist doesn't exist. Creating playlist")
-        response = self.spotify.user_playlist_create(self.spotify.current_user()['id'], playlist_name, False)
+        response = self.spotify.current_user_playlist_create(playlist_name, False)
         return response['id']
 
 
@@ -163,12 +163,14 @@ class PlaylistGenerator:
                     continue
                 items_offset = 0
                 while True:
-                    items = self.spotify.playlist_items(playlist['id'], fields='items(track(id)),next',
-                                                        limit=100, offset=items_offset, additional_types=('track',))
-                    track_ids.update(item['track']['id'] for item in items['items'] if item['track'] and item['track']['id'])
+                    # Spotify returns at most 50 per page, each under 'item' ('track' is the deprecated name).
+                    items = self.spotify.playlist_items(playlist['id'], fields='items(item(id)),next',
+                                                        limit=50, offset=items_offset, additional_types=('track',))
+                    track_ids.update(entry['item']['id'] for entry in items['items']
+                                     if entry.get('item') and entry['item']['id'])
                     if items['next'] is None:
                         break
-                    items_offset = items_offset + 100
+                    items_offset = items_offset + 50
             if response['next'] is None:
                 break
             offset = offset + 50

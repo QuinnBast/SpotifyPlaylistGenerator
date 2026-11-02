@@ -65,6 +65,16 @@
       "playlistName": "Forgotten Favourites",
       "numberOfSongs": 30,
       "minDaysSinceLiked": 365
+    },
+    "allTimeTopSongs": {
+      "enabled": false,
+      "playlistName": "All-Time Top 100",
+      "numberOfSongs": 100
+    },
+    "allTimeTopAlbums": {
+      "enabled": false,
+      "playlistName": "All-Time Top Albums",
+      "numberOfAlbums": 50
     }
   }
 }

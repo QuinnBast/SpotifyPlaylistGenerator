@@ -179,7 +179,10 @@ class PlaylistGenerator:
     def _replace_playlist_tracks(self, playlist_name, track_ids):
         playlist_id = self.create_or_get_playlist_by_name(playlist_name)
         logging.info(f"Setting {len(track_ids)} tracks in '{playlist_name}'")
-        self.spotify.playlist_replace_items(playlist_id, track_ids)
+        # Spotify takes at most 100 songs per request.
+        self.spotify.playlist_replace_items(playlist_id, track_ids[:100])
+        for start in range(100, len(track_ids), 100):
+            self.spotify.playlist_add_items(playlist_id, track_ids[start:start + 100])
 
     def daily_shuffle(self):
         """A random handful of liked songs, new every run (daily with the default cadence)."""
@@ -218,6 +221,33 @@ class PlaylistGenerator:
         picked = random.Random(f"{year}-W{week}").sample(candidates, min(forgotten_config['numberOfSongs'], len(candidates)))
         self._replace_playlist_tracks(forgotten_config['playlistName'], picked)
 
+    def _history_playlist(self, key):
+        """The config of a playlist made from the listening history, or None if it's off (or can't be made)."""
+        playlist_config = self.config['generator'].get(key, {})
+        if not playlist_config.get('enabled', False):
+            return None
+        if not self.history:
+            logging.warning(f"generator.{key} needs the listening history (listeningHistory.enabled) - skipped")
+            return None
+        return playlist_config
+
+    def all_time_top_songs(self):
+        """Your most played songs ever, from the listening history, most played first."""
+        top_config = self._history_playlist('allTimeTopSongs')
+        if not top_config:
+            return
+        track_ids = self.history.top_songs(top_config.get('numberOfSongs', 100))
+        self._replace_playlist_tracks(top_config['playlistName'], track_ids)
+
+    def all_time_top_albums(self):
+        """One song from each of your most played albums ever, most played album first. A different random song
+        (of those you've played from the album) every run."""
+        albums_config = self._history_playlist('allTimeTopAlbums')
+        if not albums_config:
+            return
+        albums = self.history.top_albums(albums_config.get('numberOfAlbums', 50))
+        self._replace_playlist_tracks(albums_config['playlistName'], [random.choice(songs) for songs in albums])
+
     def do_generation(self):
         self._liked_tracks = None  # pick up songs liked since the last run
         self.most_recently_starred()
@@ -226,6 +256,14 @@ class PlaylistGenerator:
         self.most_played("short_term")
         self.daily_shuffle()
         self.forgotten_favorites()
+        for history_playlist in (self.all_time_top_songs, self.all_time_top_albums):
+            try:
+                history_playlist()
+            except Exception as e:
+                if is_login_expired(e):
+                    raise
+                # e.g. the database is down: the other playlists are already done; try again next run.
+                logging.exception(f"{history_playlist.__name__} failed; trying again at the next scheduled run.")
 
     def _run_scheduled(self, job, what):
         """Runs a scheduled job: logs failures instead of stopping the app, and logs in again (then retries) if the

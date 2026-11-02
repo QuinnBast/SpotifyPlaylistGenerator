@@ -11,7 +11,12 @@ This app generates the following playlists and keeps them up to date on a recurr
   among your top tracks - songs you liked once and never came back to. A new random selection each week.
 
 Optionally, it also records every song you play into Postgres for a Grafana dashboard (see
-[Listening history](#listening-history-optional)).
+[Listening history](#listening-history-optional)), which adds two more (off by default, `generator.allTimeTopSongs`
+and `generator.allTimeTopAlbums`):
+
+- All-Time Top 100: your most played songs ever, most played first (counting imported data exports).
+- All-Time Top Albums: one song from each of your 50 most played albums ever, a different random song (of the ones
+  you've played from that album) every run.
 
 Note: Requires a spotify developer account & spotify app with a clientID and clientSecret.
 

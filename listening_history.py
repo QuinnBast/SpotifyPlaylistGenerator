@@ -133,6 +133,25 @@ def latest_api_play(conn):
     return conn.execute("SELECT max(played_at) FROM plays WHERE source = 'api'").fetchone()[0]
 
 
+# Songs as the dashboards count them: by main artist and name, since Spotify gives the same song several ids (single,
+# album, re-release) and the basic data export has none. Each song's id for playlists is the one played most recently.
+_SONGS = """
+    SELECT lower(artist_names[1]) AS artist, lower(album_name) AS album, lower(track_name) AS song,
+           count(*) AS plays, max(played_at) AS last_played,
+           (array_agg(track_id ORDER BY played_at DESC) FILTER (WHERE track_id IS NOT NULL))[1] AS track_id
+    FROM plays"""
+TOP_SONGS_SQL = f"""
+    SELECT (array_agg(track_id ORDER BY plays DESC))[1]   -- one song on several albums: the most played version
+    FROM ({_SONGS} GROUP BY 1, 2, 3) s
+    WHERE track_id IS NOT NULL
+    GROUP BY artist, song ORDER BY sum(plays) DESC, max(last_played) DESC LIMIT %s"""
+TOP_ALBUMS_SQL = f"""
+    SELECT array_agg(track_id ORDER BY song) FILTER (WHERE track_id IS NOT NULL)
+    FROM ({_SONGS} WHERE album_name IS NOT NULL GROUP BY 1, 2, 3) s
+    GROUP BY artist, album HAVING count(track_id) > 0
+    ORDER BY sum(plays) DESC, max(last_played) DESC LIMIT %s"""
+
+
 class ListeningHistory:
     """The `listeningHistory` section of config.json: polls "recently played" into Postgres.
 
@@ -152,16 +171,36 @@ class ListeningHistory:
         self.timezone = os.environ.get('TZ') or history_config.get('timeZone', 'UTC')
         self._prepared = False
 
+    def _connect(self):
+        """A connection to the database, set up (migrations, settings) on first use."""
+        conn = connect(self.database_url)
+        if not self._prepared:
+            try:
+                migrate(conn)
+                apply_settings(conn, self.timezone, self.grafana_password)
+            except Exception:
+                conn.close()
+                raise
+            self._prepared = True
+        return conn
+
+    def top_songs(self, count):
+        """Spotify track ids of your `count` most played songs ever, most played first."""
+        with self._connect() as conn:
+            return [row[0] for row in conn.execute(TOP_SONGS_SQL, (count,))]
+
+    def top_albums(self, count):
+        """Your `count` most played albums ever, most played first: for each, the track ids of the songs you've
+        played from it."""
+        with self._connect() as conn:
+            return [row[0] for row in conn.execute(TOP_ALBUMS_SQL, (count,))]
+
     def record_recent_plays(self, spotify):
         """Stores plays from "recently played" that aren't stored yet. Returns how many were new."""
         items = spotify.current_user_recently_played(limit=RECENTLY_PLAYED_LIMIT)['items']
         plays = [play_from_recently_played(item) for item in items if item.get('track')]
 
-        with connect(self.database_url) as conn:
-            if not self._prepared:
-                migrate(conn)
-                apply_settings(conn, self.timezone, self.grafana_password)
-                self._prepared = True
+        with self._connect() as conn:
             previous_latest = latest_api_play(conn)
             # After an import, the first poll overlaps the end of the export.
             added = store_plays(conn, without_plays_from(conn, plays, 'export'))

@@ -68,6 +68,9 @@ class FakeSpotify:
     def playlist_replace_items(self, playlist_id, track_ids):
         self.replaced[playlist_id] = list(track_ids)
 
+    def playlist_add_items(self, playlist_id, track_ids):
+        self.replaced[playlist_id] += track_ids
+
 
 CONFIG = {'generator': {
     'recurring': False, 'cadenceHours': 24,
@@ -124,6 +127,31 @@ class PlaylistsTest(unittest.TestCase):
             fake_datetime.now.return_value = NOW + timedelta(days=7)
             self.generator.do_generation()
         self.assertNotEqual(self.spotify.replaced['pl_forgotten'], first, 'next week -> new selection')
+
+    def test_all_time_playlists_from_the_listening_history(self):
+        history = mock.Mock()
+        history.top_songs.return_value = [f's{i}' for i in range(150)]
+        history.top_albums.return_value = [['a1', 'a2', 'a3'], ['b1']]
+        config = {'generator': {**CONFIG['generator'],
+                                'allTimeTopSongs': {'enabled': True, 'playlistName': 'Top 150', 'numberOfSongs': 150},
+                                'allTimeTopAlbums': {'enabled': True, 'playlistName': 'Albums', 'numberOfAlbums': 2}}}
+        generator = pg.PlaylistGenerator(config)
+        generator.history = history
+        generator.do_generation()
+        history.top_songs.assert_called_with(150)
+        self.assertEqual(generator.spotify.replaced['Top 150'], [f's{i}' for i in range(150)], 'more than 100 songs')
+        picks = {tuple(generator.spotify.replaced['Albums'])}
+        self.assertTrue(all(len(p) == 2 and p[0] in ('a1', 'a2', 'a3') and p[1] == 'b1' for p in picks))
+        for _ in range(30):
+            generator.all_time_top_albums()
+            picks.add(tuple(generator.spotify.replaced['Albums']))
+        self.assertGreater(len(picks), 1, 'a new random song per album each run')
+
+    def test_all_time_playlists_need_the_listening_history(self):
+        config = {'generator': {**CONFIG['generator'], 'allTimeTopSongs': {'enabled': True, 'playlistName': 'Top'}}}
+        generator = pg.PlaylistGenerator(config)
+        generator.do_generation()
+        self.assertNotIn('Top', generator.spotify.replaced)
 
     def test_fewer_top_tracks_than_requested(self):
         self.assertEqual(len(self.generator._get_user_top_tracks('short_term', 50)), 3)

@@ -180,6 +180,27 @@ class DatabaseTest(unittest.TestCase):
         self.assertEqual(import_history.main([folder]), 0)
         self.assertEqual(self.query("SELECT count(*) FROM plays")[0][0], 4, 'running it again adds nothing')
 
+    def test_all_time_top_songs_and_albums(self):
+        def play(minutes, track_id, name, album, artist='Artist'):
+            return {'played_at': T0 + timedelta(minutes=minutes), 'track_key': track_id or f'{artist} / {name}',
+                    'track_id': track_id, 'track_name': name, 'artist_names': [artist], 'artist_ids': None,
+                    'album_id': None, 'album_name': album, 'duration_ms': None, 'ms_played': 60_000,
+                    'context_type': None, 'context_uri': None, 'source': 'export'}
+        plays = ([play(m, 'hit_single', 'Hit', 'Hit - Single') for m in range(3)]       # one song, two ids/albums:
+                 + [play(10 + m, 'hit_album', 'Hit', 'Big Album') for m in range(4)]   # 7 plays, the album's id
+                 + [play(20 + m, 'deep_cut', 'Deep Cut', 'Big Album') for m in range(2)]
+                 + [play(30 + m, 'other', 'Other', 'Other Album', 'Someone') for m in range(5)]
+                 + [play(40 + m, None, 'No Id', 'Other Album', 'Someone') for m in range(9)])   # basic export
+        with history.connect(TEST_DATABASE_URL) as conn:
+            history.migrate(conn)
+            history.store_plays(conn, plays)
+
+        self.assertEqual(self.history.top_songs(10), ['hit_album', 'other', 'deep_cut'],
+                         'songs counted across albums, without an id left out')
+        self.assertEqual(self.history.top_songs(1), ['hit_album'])
+        self.assertEqual(self.history.top_albums(10), [['other'], ['deep_cut', 'hit_album'], ['hit_single']],
+                         'albums by plays (counting songs without an id), with the songs played from each')
+
     def _write_export(self, rows):
         folder = tempfile.mkdtemp()
         with open(os.path.join(folder, 'Streaming_History_Audio_2026_0.json'), 'w', encoding='utf-8') as f:

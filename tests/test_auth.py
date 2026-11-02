@@ -199,6 +199,44 @@ class LoginTest(unittest.TestCase):
         generator.do_generation = generation
         generator.run_generation()  # must not raise
 
+    def _cached_login_with_scope(self, scope):
+        token = {'access_token': 'a', 'refresh_token': 'r', 'scope': scope}
+        patch = mock.patch.object(FakeOAuth, '__init__', lambda oauth, **kwargs: setattr(
+            oauth, 'cache_handler', mock.Mock(**{'get_cached_token.return_value': token})))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _enable_history(self):
+        self.config['listeningHistory'] = {'enabled': True}
+        patch = mock.patch.dict(os.environ, {'DATABASE_URL': 'postgresql://unused'})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_history_off_asks_for_no_new_permissions(self):
+        self._cached_login_with_scope(auth.SpotifyAuth.SCOPES)
+        generator = pg.PlaylistGenerator(self.config)
+        self.assertEqual(generator.auth.scope, auth.SpotifyAuth.SCOPES)
+        self.assertEqual(self.posts, [], 'the existing login is still good')
+
+    def test_enabling_history_asks_for_a_login_with_the_new_permission(self):
+        """spotipy would fall back to a terminal prompt here; the app must send its usual login link instead."""
+        self._enable_history()
+        self._cached_login_with_scope(auth.SpotifyAuth.SCOPES)
+        thread, result = self._start_generator()
+
+        self.assertEqual(self._hit('/?code=granted'), 200)
+        thread.join(10)
+        self.assertFalse(thread.is_alive(), 'login should complete')
+        self.assertIn('user-read-recently-played', result['generator'].auth.scope)
+        self.assertIn('more Spotify permissions', self.posts[0]['embeds'][0]['description'])
+        self.assertEqual(FakeOAuth.exchanged, ['granted'])
+
+    def test_history_with_the_permission_already_granted_needs_no_login(self):
+        self._enable_history()
+        self._cached_login_with_scope(auth.SpotifyAuth.SCOPES + ' user-read-recently-played')
+        pg.PlaylistGenerator(self.config)
+        self.assertEqual(self.posts, [])
+
 
 if __name__ == '__main__':
     unittest.main()

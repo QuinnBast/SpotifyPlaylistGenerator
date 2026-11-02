@@ -14,6 +14,14 @@
   "credentials": {
     "username": "YourUsername"
   },
+  "listeningHistory": {
+    "enabled": false,
+    "databaseUrl": "postgresql://spotify:your-password@your-postgres-host:5432/spotify",
+    "grafanaPassword": "",
+    "timeZone": "UTC",
+    "pollMinutes": 15,
+    "lookupsPerPoll": 20
+  },
   "notifications": {
     "discord": {
       "enabled": false,
@@ -58,6 +66,16 @@
       "playlistName": "Forgotten Favourites",
       "numberOfSongs": 30,
       "minDaysSinceLiked": 365
+    },
+    "allTimeTopSongs": {
+      "enabled": false,
+      "playlistName": "All-Time Top 100",
+      "numberOfSongs": 100
+    },
+    "allTimeTopAlbums": {
+      "enabled": false,
+      "playlistName": "All-Time Top Albums",
+      "numberOfAlbums": 50
     }
   }
 }

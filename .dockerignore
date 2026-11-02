@@ -16,3 +16,4 @@ data
 *.tar.gz
 .env
 tests
+dashboards

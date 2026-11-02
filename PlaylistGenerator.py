@@ -1,7 +1,9 @@
 import os
 import json
 import random
+import requests
 import schedule
+import spotipy
 import time
 import logging
 from datetime import datetime, timedelta, timezone
@@ -16,7 +18,18 @@ class PlaylistGenerator:
     def __init__(self, config):
         self.config = config
         notifier = Notifier(config.get('notifications', {}))
-        self.auth = SpotifyAuth(config.get('api', {}), config.get('credentials', {}), config.get('login', {}), notifier)
+
+        # Optional: record every play for the listening history dashboards (needs Postgres and one more permission).
+        self.history = None
+        extra_scopes = ()
+        history_config = config.get('listeningHistory', {})
+        if history_config.get('enabled', False):
+            import listening_history  # only needs psycopg when enabled
+            self.history = listening_history.ListeningHistory(history_config)
+            extra_scopes = listening_history.SCOPES
+
+        self.auth = SpotifyAuth(config.get('api', {}), config.get('credentials', {}), config.get('login', {}), notifier,
+                                extra_scopes)
         self.spotify = self.auth.authenticate()
         self._liked_tracks = None  # all liked songs, fetched once per generation run
 
@@ -38,7 +51,7 @@ class PlaylistGenerator:
 
         # If the playlist was not found, create a new
         logging.info("Playlist doesn't exist. Creating playlist")
-        response = self.spotify.user_playlist_create(self.spotify.current_user()['id'], playlist_name, False)
+        response = self.spotify.current_user_playlist_create(playlist_name, False)
         return response['id']
 
 
@@ -152,12 +165,14 @@ class PlaylistGenerator:
                     continue
                 items_offset = 0
                 while True:
-                    items = self.spotify.playlist_items(playlist['id'], fields='items(track(id)),next',
-                                                        limit=100, offset=items_offset, additional_types=('track',))
-                    track_ids.update(item['track']['id'] for item in items['items'] if item['track'] and item['track']['id'])
+                    # Spotify returns at most 50 per page, each under 'item' ('track' is the deprecated name).
+                    items = self.spotify.playlist_items(playlist['id'], fields='items(item(id)),next',
+                                                        limit=50, offset=items_offset, additional_types=('track',))
+                    track_ids.update(entry['item']['id'] for entry in items['items']
+                                     if entry.get('item') and entry['item']['id'])
                     if items['next'] is None:
                         break
-                    items_offset = items_offset + 100
+                    items_offset = items_offset + 50
             if response['next'] is None:
                 break
             offset = offset + 50
@@ -166,7 +181,10 @@ class PlaylistGenerator:
     def _replace_playlist_tracks(self, playlist_name, track_ids):
         playlist_id = self.create_or_get_playlist_by_name(playlist_name)
         logging.info(f"Setting {len(track_ids)} tracks in '{playlist_name}'")
-        self.spotify.playlist_replace_items(playlist_id, track_ids)
+        # Spotify takes at most 100 songs per request.
+        self.spotify.playlist_replace_items(playlist_id, track_ids[:100])
+        for start in range(100, len(track_ids), 100):
+            self.spotify.playlist_add_items(playlist_id, track_ids[start:start + 100])
 
     def daily_shuffle(self):
         """A random handful of liked songs, new every run (daily with the default cadence)."""
@@ -205,6 +223,33 @@ class PlaylistGenerator:
         picked = random.Random(f"{year}-W{week}").sample(candidates, min(forgotten_config['numberOfSongs'], len(candidates)))
         self._replace_playlist_tracks(forgotten_config['playlistName'], picked)
 
+    def _history_playlist(self, key):
+        """The config of a playlist made from the listening history, or None if it's off (or can't be made)."""
+        playlist_config = self.config['generator'].get(key, {})
+        if not playlist_config.get('enabled', False):
+            return None
+        if not self.history:
+            logging.warning(f"generator.{key} needs the listening history (listeningHistory.enabled) - skipped")
+            return None
+        return playlist_config
+
+    def all_time_top_songs(self):
+        """Your most played songs ever, from the listening history, most played first."""
+        top_config = self._history_playlist('allTimeTopSongs')
+        if not top_config:
+            return
+        track_ids = self.history.top_songs(top_config.get('numberOfSongs', 100))
+        self._replace_playlist_tracks(top_config['playlistName'], track_ids)
+
+    def all_time_top_albums(self):
+        """One song from each of your most played albums ever, most played album first. A different random song
+        (of those you've played from the album) every run."""
+        albums_config = self._history_playlist('allTimeTopAlbums')
+        if not albums_config:
+            return
+        albums = self.history.top_albums(albums_config.get('numberOfAlbums', 50))
+        self._replace_playlist_tracks(albums_config['playlistName'], [random.choice(songs) for songs in albums])
+
     def do_generation(self):
         self._liked_tracks = None  # pick up songs liked since the last run
         self.most_recently_starred()
@@ -213,23 +258,46 @@ class PlaylistGenerator:
         self.most_played("short_term")
         self.daily_shuffle()
         self.forgotten_favorites()
+        for history_playlist in (self.all_time_top_songs, self.all_time_top_albums):
+            try:
+                history_playlist()
+            except Exception as e:
+                if is_login_expired(e):
+                    raise
+                # e.g. the database is down: the other playlists are already done; try again next run.
+                logging.exception(f"{history_playlist.__name__} failed; trying again at the next scheduled run.")
 
-    def run_generation(self):
-        """do_generation for the schedule: logs failures instead of stopping the app, and logs in again (then retries)
-        if the login expired since the last run."""
+    def _run_scheduled(self, job, what):
+        """Runs a scheduled job: logs failures instead of stopping the app, and logs in again (then retries) if the
+        login expired since the last run."""
         try:
-            self.do_generation()
+            job()
         except Exception as e:
             if not is_login_expired(e):
-                logging.exception("Playlist generation failed; trying again at the next scheduled run.")
+                logging.exception(f"{what} failed; trying again at the next scheduled run.")
                 return
             logging.error("Spotify login expired (invalid_grant) - re-authentication required.")
             self.spotify = self.auth.login_and_wait("required")
-            self.do_generation()
+            job()
+
+    def run_generation(self):
+        self._run_scheduled(self.do_generation, "Playlist generation")
+
+    def record_history(self):
+        self._run_scheduled(lambda: self.history.record_recent_plays(self.spotify), "Recording listening history")
+        try:
+            # A plain requests.Session: no retries, no waiting inside spotipy - a 429 pauses the lookups instead.
+            client = spotipy.Spotify(auth_manager=self.spotify.auth_manager, requests_session=requests.Session(),
+                                     requests_timeout=10)
+            self.history.look_up_details(client)
+        except Exception:
+            logging.exception("Looking up album covers and artist pictures failed; trying again after the next poll.")
 
     def schedule_generation(self):
         cadenceHours = self.config['generator']['cadenceHours']
         schedule.every(cadenceHours).hours.do(self.run_generation)
+        if self.history:
+            schedule.every(self.history.poll_minutes).minutes.do(self.record_history)
 
 
 if __name__ == "__main__":
@@ -244,12 +312,17 @@ if __name__ == "__main__":
 
     if config['generator']['recurring']:
         generator.run_generation()
+        if generator.history:
+            generator.record_history()
+            logging.info(f"Listening history: recording every {generator.history.poll_minutes:g} minutes")
         logging.info("Running on a recurring schedule")
         generator.schedule_generation()
         # Keep the program running.
         while True:
             schedule.run_pending()
             generator.auth.check_login_expiry()
-            time.sleep(600)  # Sleep for 10 minutes at a time to avoid busy-waiting
+            time.sleep(60)  # often enough for the listening history's schedule, without busy-waiting
     else:
         generator.do_generation()
+        if generator.history:
+            generator.history.record_recent_plays(generator.spotify)

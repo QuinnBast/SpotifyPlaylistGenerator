@@ -10,6 +10,14 @@ This app generates the following playlists and keeps them up to date on a recurr
 - Forgotten Favourites: 30 liked songs, liked more than a year ago, that aren't in any playlist you created and aren't
   among your top tracks - songs you liked once and never came back to. A new random selection each week.
 
+Optionally, it also records every song you play into Postgres for a Grafana dashboard (see
+[Listening history](#listening-history-optional)), which adds two more (off by default, `generator.allTimeTopSongs`
+and `generator.allTimeTopAlbums`):
+
+- All-Time Top 100: your most played songs ever, most played first (counting imported data exports).
+- All-Time Top Albums: one song from each of your 50 most played albums ever, a different random song (of the ones
+  you've played from that album) every run.
+
 Note: Requires a spotify developer account & spotify app with a clientID and clientSecret.
 
 # Configuration
@@ -31,6 +39,11 @@ secrets out of the config file/docker image:
 | `notifications.discord.webhookUrl` | `DISCORD_WEBHOOK_URL` |
 | `notifications.discord.mention` | `DISCORD_MENTION` |
 | `notifications.ntfy.url`   | `NTFY_URL`               |
+| `listeningHistory.databaseUrl` | `DATABASE_URL`       |
+| `listeningHistory.pollMinutes` | `LISTENING_HISTORY_POLL_MINUTES` |
+| `listeningHistory.timeZone` | `TZ`                    |
+| `listeningHistory.lookupsPerPoll` | `LISTENING_HISTORY_LOOKUPS_PER_POLL` |
+| `listeningHistory.grafanaPassword` | `GRAFANA_DB_PASSWORD` |
 
 The config file is read from `config.json`, or from the path in `CONFIG_PATH`.
 
@@ -60,6 +73,56 @@ You must also configure this setting in the Spotify developer dashboard. Spotify
 - Running the login on the same machine as your browser: `http://127.0.0.1:9123` works as-is.
 - But if running on a server: put an https address in front of the callback port (e.g. a reverse proxy at
   `https://spotify.example.com/` -> port 9123) and use that as `redirectUri`, so the link works from your phone or other devices.
+
+## Listening history (optional)
+
+With `listeningHistory.enabled: true`, the app also records every song you play in a Postgres database, for the
+Grafana dashboard in `dashboards/`: when you listen (days, hours, streaks, longest sessions), a year-by-year
+"Wrapped", ranked top artists, songs and albums with covers and pictures, obsessions, forgotten favourites,
+new artists you found, and devices, countries and skips (from data exports). It's off by default.
+
+- **How:** every `pollMinutes` (default 15) it reads Spotify's "recently played": your last 50 plays of 30 seconds or
+  more, with the exact time each ended. That catches every play even if the app was down for a couple of hours (it
+  logs a warning if plays may have been missed). Songs only: Spotify doesn't list podcasts there.
+- **Database:** `listeningHistory.databaseUrl` (or `DATABASE_URL`), e.g. `postgresql://spotify:<password>@postgres:5432/spotify`. The app creates its
+  tables on the first poll. If the database is down, the playlists keep working and the next poll tries again.
+- **Grafana:** set `listeningHistory.grafanaPassword` (or `GRAFANA_DB_PASSWORD`) and the app creates a read-only Postgres role `grafana` with it. Point a
+  PostgreSQL datasource with uid `spotify-history` at the database as that user, and import
+  `dashboards/spotify-listening.json` (`python dashboards/build.py dashboards` regenerates it after changing `build.py`).
+- **Album covers and artist pictures:** after each poll the app looks up `lookupsPerPoll` (default 20) songs or
+  artists it has no details for yet, most played first, one request a second. Songs the app records come with theirs;
+  imported ones are looked up one at a time (Spotify removed the batch lookups in February 2026), so a big import
+  fills in over days, starting with what the dashboard shows most. It's gentle on Spotify's rate limit (which the app's
+  other requests share): 20 requests every 15 minutes, never retried, and if Spotify ever answers "too many
+  requests" the lookups pause for as long as it asks. `0` turns them off.
+- **Days and hours** on the dashboard use `listeningHistory.timeZone` (or `TZ`), e.g. `America/Regina` (default UTC).
+- **New permission:** it needs `user-read-recently-played`. Turning it on makes the app ask for one new login (the
+  usual notification with a login link); the playlists wait until you've logged in. Turning it off asks for nothing.
+
+### Importing your past listening
+
+Spotify can send you your whole history: spotify.com -> Account -> **Privacy settings** -> **Download your data**, tick
+**Extended streaming history** (takes up to 30 days; "Account data" alone only has the last year, without track ids).
+You get an email with a zip. `import_history.py` loads it into the app's database (from `config.json`, or `DATABASE_URL`):
+
+```bash
+python import_history.py my_spotify_data.zip   # or the unzipped folder, or JSON files
+```
+
+- Add `--dry-run` to only read the export and show what it would import.
+- Only songs played for at least 30 seconds are imported (`--min-seconds` to change), to match what the app records.
+  Shorter plays are kept apart, only for the dashboard's skip stats (that's where nearly all skips are).
+  Podcasts and audiobooks are skipped.
+- Plays from when the app started recording onwards are skipped (the app has those already), and plays that are
+  already imported are skipped, so it's safe to run again, e.g. with a newer export.
+
+In a container, copy the zip in and run it there, so it uses the container's config and database:
+
+```bash
+docker cp my_spotify_data.zip <container>:/tmp/ && docker exec <container> python import_history.py /tmp/my_spotify_data.zip
+# Kubernetes:
+kubectl cp my_spotify_data.zip <pod>:/tmp/ && kubectl exec <pod> -- python import_history.py /tmp/my_spotify_data.zip
+```
 
 # Setup
 
@@ -108,4 +171,12 @@ callback listener on a free local port. From the repo root, with the requirement
 
 ```bash
 python -m unittest discover -s tests
+```
+
+The listening history's database tests are skipped unless `TEST_DATABASE_URL` points at a throwaway Postgres (they
+wipe its `public` schema):
+
+```bash
+docker run --rm -d -p 127.0.0.1:5439:5432 -e POSTGRES_PASSWORD=test postgres:17
+TEST_DATABASE_URL=postgresql://postgres:test@127.0.0.1:5439/postgres python -m unittest discover -s tests
 ```

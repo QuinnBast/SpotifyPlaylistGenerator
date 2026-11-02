@@ -42,6 +42,7 @@ secrets out of the config file/docker image:
 | `listeningHistory.databaseUrl` | `DATABASE_URL`       |
 | `listeningHistory.pollMinutes` | `LISTENING_HISTORY_POLL_MINUTES` |
 | `listeningHistory.timeZone` | `TZ`                    |
+| `listeningHistory.lookupsPerPoll` | `LISTENING_HISTORY_LOOKUPS_PER_POLL` |
 | `listeningHistory.grafanaPassword` | `GRAFANA_DB_PASSWORD` |
 
 The config file is read from `config.json`, or from the path in `CONFIG_PATH`.
@@ -87,6 +88,12 @@ default.
 - **Grafana:** set `listeningHistory.grafanaPassword` (or `GRAFANA_DB_PASSWORD`) and the app creates a read-only Postgres role `grafana` with it. Point a
   PostgreSQL datasource with uid `spotify-history` at the database as that user, and import
   `dashboards/spotify-listening.json` (`python dashboards/build.py dashboards` regenerates it after changing `build.py`).
+- **Album covers and artist pictures:** after each poll the app looks up `lookupsPerPoll` (default 20) songs or
+  artists it has no details for yet, most played first, one request a second. Songs the app records come with theirs;
+  imported ones are looked up one at a time (Spotify removed the batch lookups in February 2026), so a big import
+  fills in over days, starting with what the dashboard shows most. It's gentle on Spotify's rate limit (which the app's
+  other requests share): 20 requests every 15 minutes, never retried, and if Spotify ever answers "too many
+  requests" the lookups pause for as long as it asks. `0` turns them off.
 - **Days and hours** on the dashboard use `listeningHistory.timeZone` (or `TZ`), e.g. `America/Regina` (default UTC).
 - **New permission:** it needs `user-read-recently-played`. Turning it on makes the app ask for one new login (the
   usual notification with a login link); the playlists wait until you've logged in. Turning it off asks for nothing.

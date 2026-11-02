@@ -1,7 +1,9 @@
 import os
 import json
 import random
+import requests
 import schedule
+import spotipy
 import time
 import logging
 from datetime import datetime, timedelta, timezone
@@ -283,6 +285,13 @@ class PlaylistGenerator:
 
     def record_history(self):
         self._run_scheduled(lambda: self.history.record_recent_plays(self.spotify), "Recording listening history")
+        try:
+            # A plain requests.Session: no retries, no waiting inside spotipy - a 429 pauses the lookups instead.
+            client = spotipy.Spotify(auth_manager=self.spotify.auth_manager, requests_session=requests.Session(),
+                                     requests_timeout=10)
+            self.history.look_up_details(client)
+        except Exception:
+            logging.exception("Looking up album covers and artist pictures failed; trying again after the next poll.")
 
     def schedule_generation(self):
         cadenceHours = self.config['generator']['cadenceHours']

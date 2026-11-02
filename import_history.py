@@ -61,6 +61,9 @@ def play_from_extended(row):
         'album_id': None, 'album_name': row.get('master_metadata_album_album_name'),
         'duration_ms': None, 'ms_played': row.get('ms_played'),
         'context_type': None, 'context_uri': None, 'source': 'export',
+        'platform': row.get('platform'), 'country': row.get('conn_country'), 'shuffle': row.get('shuffle'),
+        'skipped': row.get('skipped'), 'reason_start': row.get('reason_start'), 'reason_end': row.get('reason_end'),
+        'offline': row.get('offline'), 'incognito': row.get('incognito_mode'),
     }
 
 

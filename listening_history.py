@@ -5,7 +5,8 @@ each ended. Reading it every 15 minutes or so catches every play, even after the
 import_history.py fills in the past from a Spotify data export."""
 import logging
 import os
-from datetime import datetime, timedelta
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg
@@ -27,6 +28,16 @@ SAME_PLAY_WINDOW = timedelta(seconds=10)
 
 COLUMNS = ('played_at', 'track_key', 'track_id', 'track_name', 'artist_names', 'artist_ids', 'album_id', 'album_name',
            'duration_ms', 'ms_played', 'context_type', 'context_uri', 'source')
+# How and where a play happened: only data exports have these (missing keys are stored as NULL).
+EXPORT_DETAILS = ('platform', 'country', 'shuffle', 'skipped', 'reason_start', 'reason_end', 'offline', 'incognito')
+TRACK_COLUMNS = ('track_id', 'found', 'track_name', 'duration_ms', 'artist_ids', 'artist_names', 'album_id',
+                 'album_name', 'album_image')
+ARTIST_COLUMNS = ('artist_id', 'found', 'name', 'image', 'genres')
+# Looking up details (album covers, artist pictures): requests per poll, and the pause between them. Spotify's rate
+# limit is per app over a rolling 30 seconds, so a short, spaced-out burst every poll leaves the playlists and the
+# history polls untouched.
+DEFAULT_LOOKUPS_PER_POLL = 20
+LOOKUP_SPACING_SECONDS = 1.0
 
 
 def connect(database_url):
@@ -93,16 +104,108 @@ def play_from_recently_played(item):
     }
 
 
+def _upsert(table, columns, key, update):
+    """INSERT ... ON CONFLICT (key) DO UPDATE SET each of `update` to the new value."""
+    return sql.SQL("INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO UPDATE SET {}").format(
+        sql.Identifier(table), sql.SQL(', ').join(map(sql.Identifier, columns)),
+        sql.SQL(', ').join(sql.Placeholder() * len(columns)), sql.SQL(', ').join(map(sql.Identifier, key)),
+        sql.SQL(', ').join(sql.SQL("{0} = EXCLUDED.{0}").format(sql.Identifier(c)) for c in update))
+
+
 def store_plays(conn, plays):
-    """Inserts plays that aren't stored yet; returns how many were new."""
+    """Inserts plays that aren't stored yet; returns how many were new. A play imported before these details were
+    kept gets them from a new import."""
     if not plays:
         return 0
-    query = sql.SQL("INSERT INTO plays ({}) VALUES ({}) ON CONFLICT DO NOTHING").format(
-        sql.SQL(', ').join(map(sql.Identifier, COLUMNS)), sql.SQL(', ').join(sql.Placeholder() * len(COLUMNS)))
+    columns = COLUMNS + EXPORT_DETAILS
+    query = sql.Composed([_upsert('plays', columns, ('played_at', 'track_key'), EXPORT_DETAILS),
+                          sql.SQL(" WHERE plays.platform IS NULL AND EXCLUDED.platform IS NOT NULL")])
     with conn.transaction(), conn.cursor() as cur:
         before = cur.execute("SELECT count(*) FROM plays").fetchone()[0]
-        cur.executemany(query, [tuple(play[c] for c in COLUMNS) for play in plays])
+        cur.executemany(query, [tuple(play.get(c) for c in columns) for play in plays])
         return cur.execute("SELECT count(*) FROM plays").fetchone()[0] - before
+
+
+def _store(conn, table, columns, rows):
+    """Inserts or replaces rows of the tracks or artists table."""
+    if rows:
+        query = _upsert(table, columns + ('updated_at',), columns[:1], columns[1:] + ('updated_at',))
+        now = datetime.now(timezone.utc)
+        with conn.transaction(), conn.cursor() as cur:
+            cur.executemany(query, [tuple(row.get(c) for c in columns) + (now,) for row in rows])
+
+
+def store_tracks(conn, tracks):
+    _store(conn, 'tracks', TRACK_COLUMNS, tracks)
+
+
+def store_artists(conn, artists):
+    _store(conn, 'artists', ARTIST_COLUMNS, artists)
+
+
+def pick_image(images):
+    """The URL of the smallest image at least 160 px wide (Spotify lists 640, 300 and 64 px), else the largest."""
+    images = [i for i in images or () if i.get('url')]
+    if not images:
+        return None
+    big_enough = [i for i in images if (i.get('width') or 0) >= 160]
+    return (min(big_enough, key=lambda i: i['width']) if big_enough
+            else max(images, key=lambda i: i.get('width') or 0))['url']
+
+
+def track_details(track):
+    """A Spotify track object (from "recently played" or GET /tracks/{id}) as a row for the tracks table."""
+    album = track.get('album') or {}
+    artists = [a for a in track.get('artists') or () if a.get('id')]
+    return {'track_id': track['id'], 'found': True, 'track_name': track.get('name'),
+            'duration_ms': track.get('duration_ms'), 'artist_ids': [a['id'] for a in artists],
+            'artist_names': [a['name'] for a in artists], 'album_id': album.get('id'),
+            'album_name': album.get('name'), 'album_image': pick_image(album.get('images'))}
+
+
+def artist_details(artist):
+    return {'artist_id': artist['id'], 'found': True, 'name': artist.get('name'),
+            'image': pick_image(artist.get('images')), 'genres': artist.get('genres') or None}
+
+
+# What to look up next, most played first: songs without details, and main artists without a picture (an imported
+# play's artist id comes from its song's details).
+PENDING_TRACKS_SQL = """
+    SELECT 'track', p.track_id, count(*) FROM plays p
+    WHERE p.track_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.track_id = p.track_id)
+    GROUP BY p.track_id ORDER BY count(*) DESC, p.track_id LIMIT %(limit)s"""
+PENDING_ARTISTS_SQL = """
+    SELECT 'artist', x.artist_id, count(*) FROM (
+        SELECT COALESCE(p.artist_ids[1], t.artist_ids[1]) AS artist_id FROM plays p
+        LEFT JOIN tracks t ON t.track_id = p.track_id) x
+    WHERE x.artist_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM artists a WHERE a.artist_id = x.artist_id)
+    GROUP BY x.artist_id ORDER BY count(*) DESC, x.artist_id LIMIT %(limit)s"""
+
+
+class RateLimited(Exception):
+    def __init__(self, retry_after):
+        super().__init__(f"rate limited for {retry_after} s")
+        self.retry_after = retry_after
+
+
+def look_up(client, kind, spotify_id):
+    """GET /tracks/{id} or /artists/{id} as a row; found=False if Spotify doesn't have it (any more)."""
+    try:
+        if kind == 'track':
+            return track_details(client.track(spotify_id))
+        return artist_details(client.artist(spotify_id))
+    except Exception as e:
+        status = getattr(e, 'http_status', None)
+        if status == 429:
+            headers = getattr(e, 'headers', None) or {}
+            try:
+                retry_after = int(headers.get('Retry-After') or 60)
+            except ValueError:
+                retry_after = 60
+            raise RateLimited(retry_after) from e
+        if status in (400, 404):
+            return {f'{kind}_id': spotify_id, 'found': False}
+        raise
 
 
 def without_plays_from(conn, plays, source):
@@ -169,6 +272,10 @@ class ListeningHistory:
         self.grafana_password = os.environ.get('GRAFANA_DB_PASSWORD', history_config.get('grafanaPassword')) or None
         # Days and hours on the dashboards are in this time zone.
         self.timezone = os.environ.get('TZ') or history_config.get('timeZone', 'UTC')
+        # Album covers and artist pictures for the dashboards: this many lookups after each poll (0: none).
+        self.lookups_per_poll = int(os.environ.get('LISTENING_HISTORY_LOOKUPS_PER_POLL',
+                                                   history_config.get('lookupsPerPoll', DEFAULT_LOOKUPS_PER_POLL)))
+        self._lookups_paused_until = 0.0
         self._prepared = False
 
     def _connect(self):
@@ -195,6 +302,36 @@ class ListeningHistory:
         with self._connect() as conn:
             return [row[0] for row in conn.execute(TOP_ALBUMS_SQL, (count,))]
 
+    def look_up_details(self, client, sleep=time.sleep):
+        """Looks up the details (album cover, artist picture, ...) of up to lookups_per_poll songs and artists, most
+        played first, one request at a time with a pause in between. `client` must not retry or wait on its own
+        (spotipy with a plain requests.Session): when Spotify says to slow down (429), the lookups stop and wait for
+        as long as it asks, so they never hold up the playlists or the history polls. Returns how many were looked up.
+        """
+        if self.lookups_per_poll <= 0 or time.monotonic() < self._lookups_paused_until:
+            return 0
+        done = 0
+        with self._connect() as conn:
+            limit = {'limit': self.lookups_per_poll}
+            pending = (conn.execute(PENDING_TRACKS_SQL, limit).fetchall()
+                       + conn.execute(PENDING_ARTISTS_SQL, limit).fetchall())
+            pending = sorted(pending, key=lambda row: -row[2])[:self.lookups_per_poll]
+            for i, (kind, spotify_id, _) in enumerate(pending):
+                if i:
+                    sleep(LOOKUP_SPACING_SECONDS)
+                try:
+                    row = look_up(client, kind, spotify_id)
+                except RateLimited as e:
+                    self._lookups_paused_until = time.monotonic() + e.retry_after
+                    logging.warning(f"Listening history: Spotify asked to slow down - pausing the album cover and "
+                                    f"artist picture lookups for {e.retry_after} s")
+                    break
+                (store_tracks if kind == 'track' else store_artists)(conn, [row])
+                done += 1
+        if done:
+            logging.info(f"Listening history: looked up the details of {done} song(s)/artist(s)")
+        return done
+
     def record_recent_plays(self, spotify):
         """Stores plays from "recently played" that aren't stored yet. Returns how many were new."""
         items = spotify.current_user_recently_played(limit=RECENTLY_PLAYED_LIMIT)['items']
@@ -204,6 +341,10 @@ class ListeningHistory:
             previous_latest = latest_api_play(conn)
             # After an import, the first poll overlaps the end of the export.
             added = store_plays(conn, without_plays_from(conn, plays, 'export'))
+            # The songs' details come with them: nothing to look up for what the app records.
+            tracks = {item['track']['id']: track_details(item['track'])
+                      for item in items if item.get('track') and item['track'].get('id')}
+            store_tracks(conn, list(tracks.values()))
 
         # A full page that is all new means there may have been more plays than Spotify still lists.
         if previous_latest and len(plays) == RECENTLY_PLAYED_LIMIT and min(p['played_at'] for p in plays) > previous_latest:
